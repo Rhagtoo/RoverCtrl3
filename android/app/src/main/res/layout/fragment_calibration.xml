@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!-- Камера -->
+    <androidx.camera.view.PreviewView
+        android:id="@+id/calib_preview"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/calib_panel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Крестик — вертикальная линия -->
+    <View
+        android:layout_width="2dp"
+        android:layout_height="40dp"
+        android:background="#FF5252"
+        app:layout_constraintTop_toTopOf="@id/calib_preview"
+        app:layout_constraintBottom_toBottomOf="@id/calib_preview"
+        app:layout_constraintStart_toStartOf="@id/calib_preview"
+        app:layout_constraintEnd_toEndOf="@id/calib_preview" />
+
+    <!-- Крестик — горизонтальная линия -->
+    <View
+        android:layout_width="40dp"
+        android:layout_height="2dp"
+        android:background="#FF5252"
+        app:layout_constraintTop_toTopOf="@id/calib_preview"
+        app:layout_constraintBottom_toBottomOf="@id/calib_preview"
+        app:layout_constraintStart_toStartOf="@id/calib_preview"
+        app:layout_constraintEnd_toEndOf="@id/calib_preview" />
+
+    <!-- Шаг калибровки -->
+    <TextView
+        android:id="@+id/tv_calib_step"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Step 1/10"
+        android:textColor="#00E676"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:padding="8dp"
+        android:background="#CC000000"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_margin="12dp" />
+
+    <!-- Позиция серво -->
+    <TextView
+        android:id="@+id/tv_calib_servo"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Pan: 0°  Tilt: 0°"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:padding="8dp"
+        android:background="#CC000000"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_margin="12dp" />
+
+    <!-- Инструкция -->
+    <TextView
+        android:id="@+id/tv_calib_hint"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="Совместите крестик с лазерной точкой на стене"
+        android:textColor="#FFFFFF"
+        android:textSize="15sp"
+        android:textAlignment="center"
+        android:padding="12dp"
+        android:background="#AA000000"
+        app:layout_constraintBottom_toTopOf="@id/calib_panel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Нижняя панель -->
+    <LinearLayout
+        android:id="@+id/calib_panel"
+        android:layout_width="0dp"
+        android:layout_height="64dp"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:background="#222222"
+        android:paddingHorizontal="16dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <Button
+            android:id="@+id/btn_calib_capture"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:text="CAPTURE"
+            android:textSize="16sp"
+            android:layout_marginEnd="8dp" />
+
+        <Button
+            android:id="@+id/btn_calib_skip"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:text="Skip"
+            android:textSize="13sp"
+            android:layout_marginEnd="8dp" />
+
+        <Button
+            android:id="@+id/btn_calib_cancel"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:text="Cancel"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

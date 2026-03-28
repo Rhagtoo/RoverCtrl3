@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RoverCtrl</string>
+
+    <!-- Navigation -->
+    <string name="nav_control">Control</string>
+    <string name="nav_video">Video</string>
+    <string name="nav_cfg">Settings</string>
+
+    <!-- Tracking modes (порядок должен совпадать с enum TrackingMode) -->
+    <string-array name="tracking_modes">
+        <item>Manual</item>
+        <item>Laser Dot</item>
+        <item>Object (YOLOv8)</item>
+        <item>Gyro Tilt</item>
+    </string-array>
+
+    <!-- Control -->
+    <string name="laser_on">LASER ON</string>
+    <string name="laser_off">LASER OFF</string>
+    <string name="drive">DRIVE</string>
+    <string name="camera">CAMERA</string>
+
+    <!-- Video -->
+    <string name="mode_label">Mode:</string>
+    <string name="calibrate">Calibrate</string>
+    <string name="calib_hint">Совместите крестик с лазерной точкой на стене</string>
+
+    <!-- Config -->
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="connected">Connected</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="settings_title">Connection Settings</string>
+</resources>

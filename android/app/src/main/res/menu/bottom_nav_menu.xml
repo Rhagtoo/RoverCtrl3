@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/controlFragment"
+        android:icon="@android:drawable/ic_menu_compass"
+        android:title="@string/nav_control" />
+
+    <item
+        android:id="@+id/videoFragment"
+        android:icon="@android:drawable/ic_menu_camera"
+        android:title="@string/nav_video" />
+
+    <item
+        android:id="@+id/cfgFragment"
+        android:icon="@android:drawable/ic_menu_preferences"
+        android:title="@string/nav_cfg" />
+
+</menu>

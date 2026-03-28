@@ -1,0 +1,309 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!-- CameraX Preview — живой видоискатель с камеры телефона -->
+    <androidx.camera.view.PreviewView
+        android:id="@+id/preview_view"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/toolbar_video"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- ═══ Fullscreen XIAO view (shown when swapped) ═══ -->
+    <ImageView
+        android:id="@+id/iv_xiao_main"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:scaleType="centerCrop"
+        android:visibility="gone"
+        android:contentDescription="XIAO camera fullscreen"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/toolbar_video"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Overlay для крестика трекинга -->
+    <org.rhanet.roverctrl.ui.video.TrackingOverlayView
+        android:id="@+id/overlay"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toTopOf="@id/preview_view"
+        app:layout_constraintBottom_toBottomOf="@id/preview_view"
+        app:layout_constraintStart_toStartOf="@id/preview_view"
+        app:layout_constraintEnd_toEndOf="@id/preview_view" />
+
+    <!-- ═══ PiP: MJPEG стрим с камеры турели (или телефон, если swapped) ═══ -->
+    <FrameLayout
+        android:id="@+id/pip_container_video"
+        android:layout_width="240dp"
+        android:layout_height="180dp"
+        android:background="#33FFFFFF"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/toolbar_video"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_margin="8dp">
+
+        <ImageView
+            android:id="@+id/iv_turret_pip_video"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:contentDescription="Turret camera" />
+
+        <TextView
+            android:id="@+id/tv_turret_fps_video"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="--"
+            android:textColor="#00E676"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:padding="2dp"
+            android:background="#80000000"
+            android:layout_gravity="top|end" />
+
+        <!-- Метка источника PiP -->
+        <TextView
+            android:id="@+id/tv_pip_source_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="TURRET"
+            android:textColor="#FFAB00"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:padding="2dp"
+            android:background="#80000000"
+            android:layout_gravity="top|start" />
+
+        <!-- Иконка свапа поверх PiP -->
+        <TextView
+            android:id="@+id/tv_pip_swap_hint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="⇄ TAP"
+            android:textColor="#CCFFFFFF"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:padding="3dp"
+            android:background="#60000000"
+            android:layout_gravity="bottom|center_horizontal" />
+
+        <!-- Крестик -->
+        <View
+            android:id="@+id/pip_crosshair_v"
+            android:layout_width="1dp"
+            android:layout_height="16dp"
+            android:background="#80FF5252"
+            android:layout_gravity="center" />
+        <View
+            android:id="@+id/pip_crosshair_h"
+            android:layout_width="16dp"
+            android:layout_height="1dp"
+            android:background="#80FF5252"
+            android:layout_gravity="center" />
+    </FrameLayout>
+
+    <!-- ═══ Overlay Controls (полупрозрачные, видны в Manual) ═══ -->
+
+    <!-- Левый джойстик: Drive -->
+    <org.rhanet.roverctrl.ui.control.JoystickView
+        android:id="@+id/joystick_drive_video"
+        android:layout_width="120dp"
+        android:layout_height="120dp"
+        android:alpha="0.45"
+        android:visibility="gone"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/toolbar_video"
+        android:layout_marginStart="12dp"
+        android:layout_marginBottom="12dp" />
+
+    <TextView
+        android:id="@+id/tv_drive_label_video"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="DRIVE"
+        android:textColor="#80FFFFFF"
+        android:textSize="10sp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/joystick_drive_video"
+        app:layout_constraintStart_toStartOf="@id/joystick_drive_video"
+        app:layout_constraintEnd_toEndOf="@id/joystick_drive_video" />
+
+    <!-- Правый джойстик: Camera pan/tilt -->
+    <org.rhanet.roverctrl.ui.control.JoystickView
+        android:id="@+id/joystick_cam_video"
+        android:layout_width="120dp"
+        android:layout_height="120dp"
+        android:alpha="0.45"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/toolbar_video"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="12dp" />
+
+    <TextView
+        android:id="@+id/tv_cam_label_video"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="CAM"
+        android:textColor="#80FFFFFF"
+        android:textSize="10sp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/joystick_cam_video"
+        app:layout_constraintStart_toStartOf="@id/joystick_cam_video"
+        app:layout_constraintEnd_toEndOf="@id/joystick_cam_video" />
+
+    <!-- Кнопка лазера (overlay) -->
+    <ToggleButton
+        android:id="@+id/btn_laser_video"
+        android:layout_width="48dp"
+        android:layout_height="36dp"
+        android:textOn="🔴"
+        android:textOff="⚫"
+        android:textSize="16sp"
+        android:background="#60333333"
+        android:alpha="0.7"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/joystick_cam_video"
+        app:layout_constraintEnd_toEndOf="@id/joystick_cam_video"
+        app:layout_constraintStart_toStartOf="@id/joystick_cam_video"
+        android:layout_marginBottom="8dp" />
+
+    <!-- FPS в углу -->
+    <TextView
+        android:id="@+id/tv_fps"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="0 FPS"
+        android:textColor="#00E676"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:padding="6dp"
+        android:background="#80000000"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_margin="8dp" />
+
+    <!-- Статус трекинга -->
+    <TextView
+        android:id="@+id/tv_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Manual"
+        android:textColor="#FFFFFF"
+        android:textSize="13sp"
+        android:padding="6dp"
+        android:background="#80000000"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_margin="8dp" />
+
+    <!-- Метка основного источника (показывает XIAO / PHONE) -->
+    <TextView
+        android:id="@+id/tv_main_source_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="📷 PHONE"
+        android:textColor="#80CBC4"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:padding="4dp"
+        android:background="#80000000"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/tv_status"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="2dp" />
+
+
+    <!-- Latency HUD -->
+    <TextView
+        android:id="@+id/tv_latency"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textColor="#FF9800"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:padding="4dp"
+        android:background="#80000000"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/tv_main_source_label"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="2dp" />
+
+    <!-- Нижняя панель -->
+    <LinearLayout
+        android:id="@+id/toolbar_video"
+        android:layout_width="0dp"
+        android:layout_height="48dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="#222222"
+        android:paddingHorizontal="12dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Mode:"
+            android:textColor="#AAAAAA"
+            android:textSize="12sp"
+            android:layout_marginEnd="4dp" />
+
+        <Spinner
+            android:id="@+id/spinner_mode"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:background="#333333"
+            android:popupBackground="#333333" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <!-- SWAP button -->
+        <ToggleButton
+            android:id="@+id/btn_swap_video"
+            android:layout_width="60dp"
+            android:layout_height="32dp"
+            android:textOn="XIAO"
+            android:textOff="SWAP"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:background="#6200EA"
+            android:layout_marginEnd="6dp" />
+
+        <!-- PiP toggle -->
+        <ToggleButton
+            android:id="@+id/btn_pip_video"
+            android:layout_width="52dp"
+            android:layout_height="32dp"
+            android:textOn="PiP"
+            android:textOff="PiP"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:background="#FF8F00"
+            android:layout_marginEnd="6dp" />
+
+        <Button
+            android:id="@+id/btn_calibrate"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Cal"
+            android:textSize="11sp" />
+
+    </LinearLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>
