@@ -8,8 +8,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.ToggleButton
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
@@ -78,6 +81,21 @@ class ControlFragment : Fragment() {
         // Карта одометрии
         roverViz = view.findViewById(R.id.rover_viz)
         roverViz?.setOdometry(vm.getOdometry())
+
+        // ИСПРАВЛЕНИЕ: top inset для HUD (edge-to-edge режим)
+        // MainActivity использует WindowCompat.setDecorFitsSystemWindows(false),
+        // поэтому HUD без отступа перекрывается системным status bar.
+        val hudPanel = view.findViewById<LinearLayout>(R.id.hud_panel)
+        ViewCompat.setOnApplyWindowInsetsListener(hudPanel) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(
+                v.paddingLeft,
+                systemBars.top,
+                v.paddingRight,
+                v.paddingBottom
+            )
+            insets
+        }
 
         setupDriveJoystick()
         setupCameraJoystick()
