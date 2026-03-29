@@ -1,4 +1,4 @@
-# Android
+﻿# Android
 *.iml
 .gradle/
 /local.properties
@@ -21,9 +21,14 @@
 # OS
 .DS_Store
 Thumbs.db
+*.hprof
 
 # Secrets
 *.keystore
 *.jks
 google-services.json
-*.hprof
+
+# Old Python rover (removed)
+/rover/
+config.yaml
+requirements.txt
