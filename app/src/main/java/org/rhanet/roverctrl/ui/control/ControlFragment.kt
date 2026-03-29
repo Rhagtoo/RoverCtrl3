@@ -38,21 +38,21 @@ class ControlFragment : Fragment() {
     private lateinit var btnGear:       ToggleButton
     private lateinit var tvBat:         TextView
     private lateinit var tvSpd:         TextView
+    private lateinit var tvSpdSource:   TextView
+    private lateinit var tvRpmL:        TextView
+    private lateinit var tvRpmR:        TextView
     private lateinit var tvYaw:         TextView
     private lateinit var tvRssi:        TextView
     private lateinit var tvOdom:        TextView
     private lateinit var tvGyroDebug:   TextView
     private lateinit var tvCamLabel:    TextView
 
-    // PiP
-    private lateinit var pipContainer:  FrameLayout
-    private lateinit var ivTurretPip:   ImageView
-    private lateinit var tvTurretFps:   TextView
+    private lateinit var pipContainer: FrameLayout
+    private lateinit var ivTurretPip:  ImageView
+    private lateinit var tvTurretFps:  TextView
 
-    // Карта одометрии
     private var roverViz: RoverVizView? = null
 
-    // Gyro
     private var gyroCtrl: GyroTiltController? = null
     private var gyroTickJob: Job? = null
 
@@ -69,6 +69,9 @@ class ControlFragment : Fragment() {
         btnGear       = view.findViewById(R.id.btn_gear)
         tvBat         = view.findViewById(R.id.tv_bat)
         tvSpd         = view.findViewById(R.id.tv_spd)
+        tvSpdSource   = view.findViewById(R.id.tv_spd_source)
+        tvRpmL        = view.findViewById(R.id.tv_rpm_l)
+        tvRpmR        = view.findViewById(R.id.tv_rpm_r)
         tvYaw         = view.findViewById(R.id.tv_yaw)
         tvRssi        = view.findViewById(R.id.tv_rssi)
         tvOdom        = view.findViewById(R.id.tv_odom)
@@ -78,22 +81,14 @@ class ControlFragment : Fragment() {
         ivTurretPip   = view.findViewById(R.id.iv_turret_pip)
         tvTurretFps   = view.findViewById(R.id.tv_turret_fps)
 
-        // Карта одометрии
         roverViz = view.findViewById(R.id.rover_viz)
         roverViz?.setOdometry(vm.getOdometry())
 
-        // ИСПРАВЛЕНИЕ: top inset для HUD (edge-to-edge режим)
-        // MainActivity использует WindowCompat.setDecorFitsSystemWindows(false),
-        // поэтому HUD без отступа перекрывается системным status bar.
+        // edge-to-edge: top inset для HUD
         val hudPanel = view.findViewById<LinearLayout>(R.id.hud_panel)
         ViewCompat.setOnApplyWindowInsetsListener(hudPanel) { v, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(
-                v.paddingLeft,
-                systemBars.top,
-                v.paddingRight,
-                v.paddingBottom
-            )
+            val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(v.paddingLeft, sb.top, v.paddingRight, v.paddingBottom)
             insets
         }
 
@@ -104,38 +99,26 @@ class ControlFragment : Fragment() {
         setupPip()
         setupGear()
         observeTelemetry()
+        observeRssi()
         observeTurretStream()
     }
 
-    // ── Drive ────────────────────────────────────────────────────────────
-
     private fun setupDriveJoystick() {
         joystickDrive.onMove = { x, y ->
-            val fwd = (y * 100).toInt()
-            val str = (x * 100).toInt()
-            vm.setDriveCmd(fwd, str, fwd)
+            vm.setDriveCmd((y * 100).toInt(), (x * 100).toInt(), (y * 100).toInt())
         }
     }
-
-    // ── Camera joystick (disabled in GYRO_TILT) ──────────────────────────
 
     private fun setupCameraJoystick() {
         joystickCam.onMove = { x, y ->
-            if (vm.trackMode.value == TrackingMode.MANUAL) {
+            if (vm.trackMode.value == TrackingMode.MANUAL)
                 vm.setPanTilt((x * 100).toInt(), (y * 100).toInt())
-            }
         }
     }
-
-    // ── Laser ────────────────────────────────────────────────────────────
 
     private fun setupLaser() {
-        btnLaser.setOnCheckedChangeListener { _, isChecked ->
-            vm.laserOn = isChecked
-        }
+        btnLaser.setOnCheckedChangeListener { _, isChecked -> vm.laserOn = isChecked }
     }
-
-    // ── Gyro Tilt ────────────────────────────────────────────────────────
 
     private fun setupGyroTilt() {
         btnGyroTilt.setOnCheckedChangeListener { _, isChecked ->
@@ -145,18 +128,13 @@ class ControlFragment : Fragment() {
 
     private fun startGyroTilt() {
         vm.setTrackMode(TrackingMode.GYRO_TILT)
-
-        if (gyroCtrl == null) {
-            gyroCtrl = GyroTiltController(requireContext())
-        }
+        if (gyroCtrl == null) gyroCtrl = GyroTiltController(requireContext())
         gyroCtrl!!.zero()
         gyroCtrl!!.start()
-
         joystickCam.alpha = 0.3f
         joystickCam.isEnabled = false
         tvCamLabel.text = "GYRO"
         tvGyroDebug.visibility = View.VISIBLE
-
         gyroTickJob = viewLifecycleOwner.lifecycleScope.launch {
             while (true) {
                 gyroCtrl?.let { g ->
@@ -173,53 +151,37 @@ class ControlFragment : Fragment() {
     }
 
     private fun stopGyroTilt() {
-        gyroTickJob?.cancel()
-        gyroTickJob = null
+        gyroTickJob?.cancel(); gyroTickJob = null
         gyroCtrl?.stop()
-
         vm.setTrackMode(TrackingMode.MANUAL)
         vm.setPanTilt(0, 0)
-
         joystickCam.alpha = 1.0f
         joystickCam.isEnabled = true
         tvCamLabel.text = "CAMERA"
         tvGyroDebug.visibility = View.GONE
     }
 
-    // ── PiP ──────────────────────────────────────────────────────────────
-
     private fun setupPip() {
         btnPip.setOnCheckedChangeListener { _, isChecked ->
             pipContainer.visibility = if (isChecked) View.VISIBLE else View.GONE
         }
-
-        // Тап по PiP = recenter гиро
-        pipContainer.setOnClickListener {
-            gyroCtrl?.zero()
-        }
+        pipContainer.setOnClickListener { gyroCtrl?.zero() }
     }
-
-    // ── Gear ─────────────────────────────────────────────────────────────
 
     private fun setupGear() {
         btnGear.setOnCheckedChangeListener { _, isChecked ->
             vm.setGear(if (isChecked) 1 else 2)
         }
         viewLifecycleOwner.lifecycleScope.launch {
-            vm.gear.collectLatest { g ->
-                btnGear.isChecked = (g == 1)
-            }
+            vm.gear.collectLatest { g -> btnGear.isChecked = (g == 1) }
         }
     }
-
-    // ── Turret stream ────────────────────────────────────────────────────
 
     private fun observeTurretStream() {
         viewLifecycleOwner.lifecycleScope.launch {
             vm.turretFrame.collectLatest { bmp ->
-                if (bmp != null && pipContainer.visibility == View.VISIBLE) {
+                if (bmp != null && pipContainer.visibility == View.VISIBLE)
                     ivTurretPip.setImageBitmap(bmp)
-                }
             }
         }
         viewLifecycleOwner.lifecycleScope.launch {
@@ -228,33 +190,60 @@ class ControlFragment : Fragment() {
             }
         }
         viewLifecycleOwner.lifecycleScope.launch {
-            vm.turretConnected.collectLatest { connected ->
-                if (connected && !btnPip.isChecked) {
-                    btnPip.isChecked = true
-                }
-            }
+            vm.turretConnected.collectLatest { if (it && !btnPip.isChecked) btnPip.isChecked = true }
         }
     }
 
-    // ── Телеметрия ───────────────────────────────────────────────────────
+    // FIX: RSSI читается через WifiManager (vm.wifiRssi),
+    // а не из телеметрии (telem.rssi всегда 0 — ESP32 в AP-режиме).
+    private fun observeRssi() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            vm.wifiRssi.collectLatest { rssi ->
+                tvRssi.text = if (rssi != 0) "$rssi dBm" else "--"
+                tvRssi.setTextColor(when {
+                    rssi >= -60 -> 0xFF00E676.toInt()  // отличный
+                    rssi >= -70 -> 0xFFFFAB00.toInt()  // средний
+                    rssi >= -80 -> 0xFFFF8F00.toInt()  // слабый
+                    rssi != 0   -> 0xFFFF5252.toInt()  // плохой
+                    else        -> 0xFF888888.toInt()  // нет данных
+                })
+            }
+        }
+    }
 
     private fun observeTelemetry() {
         viewLifecycleOwner.lifecycleScope.launch {
             vm.telem.collectLatest { t ->
                 tvBat.text = if (t.bat >= 0) "${t.bat}%" else "--"
 
-                // Реальная скорость из RPM + мощность мотора
                 val realSpeed = t.speedMs
-                tvSpd.text = if (!realSpeed.isNaN()) {
-                    String.format("%.2f m/s (%d%%)", kotlin.math.abs(realSpeed), t.powerPct)
+                if (!realSpeed.isNaN()) {
+                    tvSpd.text = String.format("%.2f m/s  %d%%",
+                        kotlin.math.abs(realSpeed), t.powerPct)
+                    tvSpdSource.text = "⊙ RPM"
+                    tvSpdSource.setTextColor(0xFF00E676.toInt())
                 } else {
-                    String.format("%d%%", t.powerPct)
+                    tvSpd.text = String.format("%d%%", t.powerPct)
+                    tvSpdSource.text = "~ PWM"
+                    tvSpdSource.setTextColor(0xFFFF8F00.toInt())
                 }
 
-                tvYaw.text  = String.format("%.0f°", t.yaw)
-                tvRssi.text = "${t.rssi} dBm"
+                tvRpmL.text = if (t.rpmL.isNaN()) "--" else String.format("%.0f", t.rpmL)
+                tvRpmR.text = if (t.rpmR.isNaN()) "--" else String.format("%.0f", t.rpmR)
+
+                if (!t.rpmL.isNaN() && !t.rpmR.isNaN()) {
+                    val diff = kotlin.math.abs(t.rpmL - t.rpmR)
+                    val avg  = (kotlin.math.abs(t.rpmL) + kotlin.math.abs(t.rpmR)) / 2f
+                    val warn = avg > 5f && diff / avg.coerceAtLeast(1f) > 0.20f
+                    val c = if (warn) 0xFFFFAB00.toInt() else 0xFF80CBC4.toInt()
+                    tvRpmL.setTextColor(c); tvRpmR.setTextColor(c)
+                }
+
+                tvYaw.text = String.format("%.0f°", t.yaw)
+                // tvRssi — через observeRssi()
             }
         }
+
         viewLifecycleOwner.lifecycleScope.launch {
             vm.pose.collectLatest { p ->
                 tvOdom.text = String.format("X:%.2f Y:%.2f H:%.0f° D:%.1fm",
@@ -262,24 +251,16 @@ class ControlFragment : Fragment() {
                     Math.toDegrees(p.headingRad.toDouble()),
                     vm.getOdometry().distanceMeters
                 )
-                // Обновляем карту
                 roverViz?.refresh()
             }
         }
     }
 
-    // ── Lifecycle ────────────────────────────────────────────────────────
-
-    override fun onPause() {
-        super.onPause()
-        gyroCtrl?.stop()
-    }
+    override fun onPause() { super.onPause(); gyroCtrl?.stop() }
 
     override fun onResume() {
         super.onResume()
-        if (btnGyroTilt.isChecked) {
-            gyroCtrl?.start()
-        }
+        if (btnGyroTilt.isChecked) gyroCtrl?.start()
     }
 
     override fun onDestroyView() {

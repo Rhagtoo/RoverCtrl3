@@ -1,6 +1,6 @@
 /**
- * rover_ap.ino v2.3 — Ровер XIAO ESP32S3, WiFi AP
- * v2.3: добавлен "str" в телеметрию для одометрии Ackermann
+ * rover_ap.ino v2.4
+ * fix: rpmL инвертирован (левый энкодер физически подключён в обратной полярности)
  */
 #include <WiFi.h>
 #include <WiFiUdp.h>
@@ -68,8 +68,13 @@ void updateRpm() {
     if (dt >= RPM_SAMPLE_MS) {
         readEncoders();
         float factor = 60000.0f / (ENCODER_PPR * dt);
-        rpmL = (encCountL - prevEncL) * factor;
-        rpmR = (encCountR - prevEncR) * factor;
+
+        // FIX v2.4: левый энкодер физически подключён в обратной полярности —
+        // при движении вперёд счётчик идёт вниз. Инвертируем знак rpmL
+        // чтобы оба колеса давали положительный RPM при движении вперёд.
+        rpmL = -(encCountL - prevEncL) * factor;   // ← минус
+        rpmR =  (encCountR - prevEncR) * factor;
+
         prevEncL = encCountL; prevEncR = encCountR;
         lastRpmSampleTime = now;
     }
@@ -116,23 +121,24 @@ void checkWatchdog() {
     }
 }
 
-// v2.3: добавлен "str" для одометрии Ackermann
 void sendTelemetry() {
     if (!haveRemote) return;
     if (millis() - lastTelemTime < TELEM_INTERVAL_MS) return;
     lastTelemTime = millis();
     char buf[256];
+    // rssi убран из телеметрии: в AP-режиме WiFi.RSSI() всегда возвращает 0
+    // (нет базовой станции). Телефон читает своё RSSI через WifiManager.
     snprintf(buf, sizeof(buf),
         "{\"bat\":100,\"yaw\":0.0,\"spd\":%d,\"str\":%d,"
-        "\"pit\":0.0,\"rol\":0.0,\"rssi\":%d,\"rpmL\":%.1f,\"rpmR\":%.1f}",
-        abs(lastFwd), lastStr, WiFi.RSSI(), rpmL, rpmR);
+        "\"pit\":0.0,\"rol\":0.0,\"rssi\":0,\"rpmL\":%.1f,\"rpmR\":%.1f}",
+        abs(lastFwd), lastStr, rpmL, rpmR);
     udpTelem.beginPacket(remoteIP, TELEM_PORT);
     udpTelem.write((const uint8_t*)buf, strlen(buf));
     udpTelem.endPacket();
 }
 
 void setup() {
-    Serial.begin(115200); Serial.println("\n=== Rover AP v2.3 ===");
+    Serial.begin(115200); Serial.println("\n=== Rover AP v2.4 ===");
     pinMode(MOTOR_IN1, OUTPUT); pinMode(MOTOR_IN2, OUTPUT);
     pinMode(PWM_LEFT, OUTPUT); pinMode(PWM_RIGHT, OUTPUT);
     pinMode(LASER_PIN, OUTPUT); stopMotors(); digitalWrite(LASER_PIN, LOW);
