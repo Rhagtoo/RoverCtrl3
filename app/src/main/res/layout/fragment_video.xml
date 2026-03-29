@@ -6,7 +6,7 @@
     android:layout_height="match_parent"
     android:background="#000000">
 
-    <!-- CameraX Preview — живой видоискатель с камеры телефона -->
+    <!-- CameraX Preview -->
     <androidx.camera.view.PreviewView
         android:id="@+id/preview_view"
         android:layout_width="0dp"
@@ -16,7 +16,7 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <!-- ═══ Fullscreen XIAO view (shown when swapped) ═══ -->
+    <!-- Fullscreen XIAO view (shown when swapped) -->
     <ImageView
         android:id="@+id/iv_xiao_main"
         android:layout_width="0dp"
@@ -29,7 +29,7 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <!-- Overlay для крестика трекинга -->
+    <!-- Overlay трекинга -->
     <org.rhanet.roverctrl.ui.video.TrackingOverlayView
         android:id="@+id/overlay"
         android:layout_width="0dp"
@@ -39,7 +39,7 @@
         app:layout_constraintStart_toStartOf="@id/preview_view"
         app:layout_constraintEnd_toEndOf="@id/preview_view" />
 
-    <!-- ═══ PiP: MJPEG стрим с камеры турели (или телефон, если swapped) ═══ -->
+    <!-- PiP: MJPEG турели -->
     <FrameLayout
         android:id="@+id/pip_container_video"
         android:layout_width="240dp"
@@ -69,7 +69,6 @@
             android:background="#80000000"
             android:layout_gravity="top|end" />
 
-        <!-- Метка источника PiP -->
         <TextView
             android:id="@+id/tv_pip_source_label"
             android:layout_width="wrap_content"
@@ -82,7 +81,6 @@
             android:background="#80000000"
             android:layout_gravity="top|start" />
 
-        <!-- Иконка свапа поверх PiP -->
         <TextView
             android:id="@+id/tv_pip_swap_hint"
             android:layout_width="wrap_content"
@@ -95,24 +93,15 @@
             android:background="#60000000"
             android:layout_gravity="bottom|center_horizontal" />
 
-        <!-- Крестик -->
-        <View
-            android:id="@+id/pip_crosshair_v"
-            android:layout_width="1dp"
-            android:layout_height="16dp"
-            android:background="#80FF5252"
-            android:layout_gravity="center" />
-        <View
-            android:id="@+id/pip_crosshair_h"
-            android:layout_width="16dp"
-            android:layout_height="1dp"
-            android:background="#80FF5252"
-            android:layout_gravity="center" />
+        <View android:id="@+id/pip_crosshair_v"
+            android:layout_width="1dp" android:layout_height="16dp"
+            android:background="#80FF5252" android:layout_gravity="center" />
+        <View android:id="@+id/pip_crosshair_h"
+            android:layout_width="16dp" android:layout_height="1dp"
+            android:background="#80FF5252" android:layout_gravity="center" />
     </FrameLayout>
 
-    <!-- ═══ Overlay Controls (полупрозрачные, видны в Manual) ═══ -->
-
-    <!-- Левый джойстик: Drive -->
+    <!-- Overlay: Drive джойстик (Manual) -->
     <org.rhanet.roverctrl.ui.control.JoystickView
         android:id="@+id/joystick_drive_video"
         android:layout_width="120dp"
@@ -136,7 +125,7 @@
         app:layout_constraintStart_toStartOf="@id/joystick_drive_video"
         app:layout_constraintEnd_toEndOf="@id/joystick_drive_video" />
 
-    <!-- Правый джойстик: Camera pan/tilt -->
+    <!-- Overlay: Camera pan/tilt джойстик (Manual) -->
     <org.rhanet.roverctrl.ui.control.JoystickView
         android:id="@+id/joystick_cam_video"
         android:layout_width="120dp"
@@ -160,7 +149,7 @@
         app:layout_constraintStart_toStartOf="@id/joystick_cam_video"
         app:layout_constraintEnd_toEndOf="@id/joystick_cam_video" />
 
-    <!-- Кнопка лазера (overlay) -->
+    <!-- Лазер (Manual) -->
     <ToggleButton
         android:id="@+id/btn_laser_video"
         android:layout_width="48dp"
@@ -176,7 +165,53 @@
         app:layout_constraintStart_toStartOf="@id/joystick_cam_video"
         android:layout_marginBottom="8dp" />
 
-    <!-- FPS в углу -->
+    <!-- ═══ TOP-LEFT HUD: статус + источник + латенси ═══ -->
+    <LinearLayout
+        android:id="@+id/video_hud_left"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#80000000"
+        android:paddingHorizontal="6dp"
+        android:paddingVertical="4dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_margin="8dp">
+
+        <!-- Режим трекинга -->
+        <TextView
+            android:id="@+id/tv_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Manual"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <!-- Источник (XIAO / PHONE) -->
+        <TextView
+            android:id="@+id/tv_main_source_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📷 PHONE"
+            android:textColor="#80CBC4"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+
+        <TextView
+            android:id="@+id/tv_latency"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="-- ms"
+            android:textColor="#FF9800"
+            android:textSize="11sp"
+            android:visibility="visible" />
+
+    </LinearLayout>
+
+    <!-- TOP-RIGHT: FPS камеры -->
     <TextView
         android:id="@+id/tv_fps"
         android:layout_width="wrap_content"
@@ -190,55 +225,6 @@
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_margin="8dp" />
-
-    <!-- Статус трекинга -->
-    <TextView
-        android:id="@+id/tv_status"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Manual"
-        android:textColor="#FFFFFF"
-        android:textSize="13sp"
-        android:padding="6dp"
-        android:background="#80000000"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_margin="8dp" />
-
-    <!-- Метка основного источника (показывает XIAO / PHONE) -->
-    <TextView
-        android:id="@+id/tv_main_source_label"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="📷 PHONE"
-        android:textColor="#80CBC4"
-        android:textSize="11sp"
-        android:textStyle="bold"
-        android:padding="4dp"
-        android:background="#80000000"
-        android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/tv_status"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginStart="8dp"
-        android:layout_marginTop="2dp" />
-
-
-    <!-- Latency HUD -->
-    <TextView
-        android:id="@+id/tv_latency"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text=""
-        android:textColor="#FF9800"
-        android:textSize="12sp"
-        android:textStyle="bold"
-        android:padding="4dp"
-        android:background="#80000000"
-        android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/tv_main_source_label"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginStart="8dp"
-        android:layout_marginTop="2dp" />
 
     <!-- Нижняя панель -->
     <LinearLayout
@@ -273,7 +259,6 @@
             android:layout_height="1dp"
             android:layout_weight="1" />
 
-        <!-- SWAP button -->
         <ToggleButton
             android:id="@+id/btn_swap_video"
             android:layout_width="60dp"
@@ -285,7 +270,6 @@
             android:background="#6200EA"
             android:layout_marginEnd="6dp" />
 
-        <!-- PiP toggle -->
         <ToggleButton
             android:id="@+id/btn_pip_video"
             android:layout_width="52dp"

@@ -49,30 +49,35 @@
         android:paddingHorizontal="8dp"
         android:paddingVertical="3dp">
 
-        <!-- Строка 1 -->
+        <!-- Строка 1: BAT / SPD / YAW / RSSI -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical">
+
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="BAT:" android:textColor="#888" android:textSize="12sp" />
             <TextView android:id="@+id/tv_bat"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="--" android:textColor="#00E676" android:textSize="12sp"
                 android:textStyle="bold" android:paddingStart="2dp" android:paddingEnd="10dp" />
+
+            <!-- SPD: показывает м/с (из RPM) или % (PWM fallback) -->
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="SPD:" android:textColor="#888" android:textSize="12sp" />
             <TextView android:id="@+id/tv_spd"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="--" android:textColor="#FFF" android:textSize="12sp"
                 android:paddingStart="2dp" android:paddingEnd="10dp" />
+
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="YAW:" android:textColor="#888" android:textSize="12sp" />
             <TextView android:id="@+id/tv_yaw"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="0°" android:textColor="#FFF" android:textSize="12sp"
                 android:paddingStart="2dp" android:paddingEnd="10dp" />
+
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="RSSI:" android:textColor="#888" android:textSize="12sp" />
             <TextView android:id="@+id/tv_rssi"
@@ -81,7 +86,45 @@
                 android:paddingStart="2dp" />
         </LinearLayout>
 
-        <!-- Строка 2: одометрия -->
+        <!-- Строка 2: RPM левого и правого колеса + индикатор источника скорости -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="RPM:" android:textColor="#888" android:textSize="11sp" />
+
+            <!-- L: левое колесо -->
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="L:" android:textColor="#888" android:textSize="11sp"
+                android:paddingStart="4dp" />
+            <TextView android:id="@+id/tv_rpm_l"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="--" android:textColor="#80CBC4" android:textSize="11sp"
+                android:textStyle="bold" android:minWidth="36dp"
+                android:paddingStart="2dp" />
+
+            <!-- R: правое колесо -->
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="R:" android:textColor="#888" android:textSize="11sp"
+                android:paddingStart="4dp" />
+            <TextView android:id="@+id/tv_rpm_r"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="--" android:textColor="#80CBC4" android:textSize="11sp"
+                android:textStyle="bold" android:minWidth="36dp"
+                android:paddingStart="2dp" />
+
+            <!-- Индикатор источника: ⊙ RPM или ~ PWM -->
+            <TextView android:id="@+id/tv_spd_source"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="~ PWM"
+                android:textColor="#FF8F00" android:textSize="10sp"
+                android:paddingStart="10dp" />
+        </LinearLayout>
+
+        <!-- Строка 3: одометрия -->
         <TextView android:id="@+id/tv_odom"
             android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="X:0.00 Y:0.00 H:0° D:0.0m"
