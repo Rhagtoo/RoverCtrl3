@@ -205,5 +205,259 @@
             android:textSize="11sp"
             android:layout_marginTop="8dp" />
 
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- ── OTA FIRMWARE UPDATE ──────────────────────────────────────── -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#333333"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="OTA FIRMWARE UPDATE"
+            android:textColor="#FF6D00"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Target device"
+            android:textColor="#AAAAAA"
+            android:textSize="12sp"
+            android:layout_marginBottom="4dp" />
+
+        <RadioGroup
+            android:id="@+id/rg_ota_target"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="12dp">
+
+            <RadioButton
+                android:id="@+id/rb_ota_rover"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Rover (192.168.4.1)"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:checked="true" />
+
+            <RadioButton
+                android:id="@+id/rb_ota_turret"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Turret (192.168.4.2)"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp" />
+
+        </RadioGroup>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <Button
+                android:id="@+id/btn_select_bin"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="Select .bin"
+                android:textSize="13sp"
+                android:backgroundTint="#444444"
+                android:layout_marginEnd="8dp" />
+
+            <TextView
+                android:id="@+id/tv_ota_filename"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="2"
+                android:text="No file selected"
+                android:textColor="#888888"
+                android:textSize="12sp"
+                android:gravity="center_vertical"
+                android:ellipsize="start"
+                android:singleLine="true" />
+
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/pb_ota"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="8dp"
+            android:max="100"
+            android:progress="0"
+            android:layout_marginBottom="4dp"
+            android:visibility="invisible" />
+
+        <TextView
+            android:id="@+id/tv_ota_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#AAAAAA"
+            android:textSize="12sp"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btn_ota_upload"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="Flash Firmware"
+            android:textSize="15sp"
+            android:enabled="false"
+            android:backgroundTint="#BF360C" />
+
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- ── JOYSTICK SENSITIVITY ──────────────────────────────────────── -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#333333"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="JOYSTICK SENSITIVITY"
+            android:textColor="#00BCD4"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Drive Speed -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp">
+            <TextView
+                android:layout_width="110dp"
+                android:layout_height="wrap_content"
+                android:text="Drive Speed"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp" />
+            <TextView
+                android:id="@+id/tv_drive_speed_val"
+                android:layout_width="40dp"
+                android:layout_height="wrap_content"
+                android:text="1.0x"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:gravity="end" />
+        </LinearLayout>
+        <SeekBar
+            android:id="@+id/sb_drive_speed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="19"
+            android:progress="9"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Drive Steer -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp">
+            <TextView
+                android:layout_width="110dp"
+                android:layout_height="wrap_content"
+                android:text="Drive Steer"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp" />
+            <TextView
+                android:id="@+id/tv_drive_steer_val"
+                android:layout_width="40dp"
+                android:layout_height="wrap_content"
+                android:text="1.0x"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:gravity="end" />
+        </LinearLayout>
+        <SeekBar
+            android:id="@+id/sb_drive_steer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="19"
+            android:progress="9"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Cam Pan -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp">
+            <TextView
+                android:layout_width="110dp"
+                android:layout_height="wrap_content"
+                android:text="Camera Pan"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp" />
+            <TextView
+                android:id="@+id/tv_cam_pan_val"
+                android:layout_width="40dp"
+                android:layout_height="wrap_content"
+                android:text="1.0x"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:gravity="end" />
+        </LinearLayout>
+        <SeekBar
+            android:id="@+id/sb_cam_pan"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="19"
+            android:progress="9"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Cam Tilt -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp">
+            <TextView
+                android:layout_width="110dp"
+                android:layout_height="wrap_content"
+                android:text="Camera Tilt"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp" />
+            <TextView
+                android:id="@+id/tv_cam_tilt_val"
+                android:layout_width="40dp"
+                android:layout_height="wrap_content"
+                android:text="1.0x"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:gravity="end" />
+        </LinearLayout>
+        <SeekBar
+            android:id="@+id/sb_cam_tilt"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="19"
+            android:progress="9"
+            android:layout_marginBottom="8dp" />
+
     </LinearLayout>
 </ScrollView>

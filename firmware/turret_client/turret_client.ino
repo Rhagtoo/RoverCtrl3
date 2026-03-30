@@ -1,10 +1,15 @@
 /**
- * turret_client.ino v2.3 — Virtual angle для CR tilt серво
+ * turret_client.ino v2.4
+ * + OTA прошивка: ArduinoOTA (Arduino IDE) + HTTP POST /update (Android app, port 80)
+ * Virtual angle для CR tilt серво
  * PAN: позиционное. TILT: CR + PID → ведёт себя как позиционное.
  * КАЛИБРОВКА: TILT_NEUTRAL (стоп), TILT_DEG_PER_SEC (скорость)
  */
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <WebServer.h>
+#include <Update.h>
+#include <ArduinoOTA.h>
 #include <ESP32Servo.h>
 #include "esp_camera.h"
 #include "esp_http_server.h"
@@ -43,6 +48,7 @@ const IPAddress STATIC_IP(192,168,4,2),GATEWAY(192,168,4,1),SUBNET(255,255,255,0
 #define TILT_MAX_ANGLE    170.0f
 
 WiFiUDP udp; Servo servoPan, servoTilt; httpd_handle_t httpd = NULL;
+WebServer otaServer(80);
 int currentPan = 90; volatile bool panDirty = false; volatile int targetPan = 90;
 float virtualTiltAngle = 90.0f; volatile float tiltTargetAngle = 90.0f;
 int currentTiltPwm = TILT_NEUTRAL; unsigned long lastTiltLoopMs = 0;
@@ -215,8 +221,55 @@ void setup() {
     connectWiFi();
     udp.begin(UDP_PORT);
     startHttpServer();
+
+    // ── ArduinoOTA (прошивка через Arduino IDE) ───────────────────────────
+    ArduinoOTA.setHostname("turret-client");
+    ArduinoOTA.onStart([]() { Serial.println("OTA Start"); });
+    ArduinoOTA.onEnd([]()   { Serial.println("\nOTA End"); });
+    ArduinoOTA.onProgress([](unsigned int done, unsigned int total) {
+        Serial.printf("OTA %u%%\r", done * 100 / total);
+    });
+    ArduinoOTA.onError([](ota_error_t e) {
+        Serial.printf("OTA Error[%u]\n", e);
+    });
+    ArduinoOTA.begin();
+
+    // ── HTTP OTA /update на порту 80 (прошивка через Android-приложение) ──
+    otaServer.on("/update", HTTP_POST,
+        []() {  // onComplete
+            otaServer.send(200, "text/plain", Update.hasError() ? "FAIL" : "OK");
+            if (!Update.hasError()) { delay(500); ESP.restart(); }
+        },
+        []() {  // onUpload
+            HTTPUpload& upload = otaServer.upload();
+            if (upload.status == UPLOAD_FILE_START) {
+                Serial.printf("HTTP OTA: %s\n", upload.filename.c_str());
+                if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+                    Update.printError(Serial);
+                }
+            } else if (upload.status == UPLOAD_FILE_WRITE) {
+                if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+                    Update.printError(Serial);
+                }
+            } else if (upload.status == UPLOAD_FILE_END) {
+                if (Update.end(true)) {
+                    Serial.printf("HTTP OTA OK: %u bytes\n", upload.totalSize);
+                } else {
+                    Update.printError(Serial);
+                }
+            }
+        }
+    );
+    otaServer.begin();
+
     xTaskCreatePinnedToCore(udpTask, "udp", 4096, NULL, 1, NULL, 0);
     Serial.println("Ready!");
 }
 
-void loop() { checkWiFi(); updateServos(); delay(10); }
+void loop() {
+    checkWiFi();
+    ArduinoOTA.handle();
+    otaServer.handleClient();
+    updateServos();
+    delay(10);
+}

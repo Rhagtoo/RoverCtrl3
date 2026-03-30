@@ -18,6 +18,7 @@ import org.rhanet.roverctrl.data.*
 import org.rhanet.roverctrl.network.CommandSender
 import org.rhanet.roverctrl.network.MjpegDecoder
 import org.rhanet.roverctrl.network.TelemetryReceiver
+import org.rhanet.roverctrl.data.AppSettings
 import org.rhanet.roverctrl.tracking.CalibrationResult
 import org.rhanet.roverctrl.tracking.OdometryTracker
 import org.rhanet.roverctrl.tracking.PidController
@@ -73,6 +74,18 @@ class RoverViewModel : ViewModel() {
     private val _gear            = MutableStateFlow(2)
     val gear: StateFlow<Int> get() = _gear
     fun setGear(g: Int) { _gear.value = g }
+
+    private val _sensitivity     = MutableStateFlow(AppSettings())
+    val sensitivity: StateFlow<AppSettings> get() = _sensitivity
+
+    fun loadSettings(context: Context) {
+        _sensitivity.value = AppSettings.load(context)
+    }
+
+    fun updateSensitivity(context: Context, s: AppSettings) {
+        AppSettings.save(context, s)
+        _sensitivity.value = s
+    }
 
     @Volatile var panCmd  = 0
     @Volatile var tiltCmd = 0

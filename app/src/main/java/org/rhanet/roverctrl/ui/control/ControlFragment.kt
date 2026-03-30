@@ -92,6 +92,7 @@ class ControlFragment : Fragment() {
             insets
         }
 
+        vm.loadSettings(requireContext())
         setupDriveJoystick()
         setupCameraJoystick()
         setupLaser()
@@ -105,14 +106,21 @@ class ControlFragment : Fragment() {
 
     private fun setupDriveJoystick() {
         joystickDrive.onMove = { x, y ->
-            vm.setDriveCmd((y * 100).toInt(), (x * 100).toInt(), (y * 100).toInt())
+            val s = vm.sensitivity.value
+            val fwd = (y * 100 * s.driveSpeedSens).toInt().coerceIn(-100, 100)
+            val str = (x * 100 * s.driveSteerSens).toInt().coerceIn(-100, 100)
+            vm.setDriveCmd(fwd, str, fwd)
         }
     }
 
     private fun setupCameraJoystick() {
         joystickCam.onMove = { x, y ->
-            if (vm.trackMode.value == TrackingMode.MANUAL)
-                vm.setPanTilt((x * 100).toInt(), (y * 100).toInt())
+            if (vm.trackMode.value == TrackingMode.MANUAL) {
+                val s = vm.sensitivity.value
+                val pan  = (x * 100 * s.camPanSens).toInt().coerceIn(-100, 100)
+                val tilt = (y * 100 * s.camTiltSens).toInt().coerceIn(-100, 100)
+                vm.setPanTilt(pan, tilt)
+            }
         }
     }
 

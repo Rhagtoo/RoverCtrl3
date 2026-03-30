@@ -1,9 +1,13 @@
 /**
- * rover_ap.ino v2.4
+ * rover_ap.ino v2.5
+ * + OTA прошивка: ArduinoOTA (Arduino IDE) + HTTP POST /update (Android app)
  * fix: rpmL инвертирован (левый энкодер физически подключён в обратной полярности)
  */
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <WebServer.h>
+#include <Update.h>
+#include <ArduinoOTA.h>
 #include <ESP32Servo.h>
 #include "driver/pcnt.h"
 
@@ -32,6 +36,7 @@ const IPAddress AP_SUBNET(255, 255, 255, 0);
 
 WiFiUDP udp;
 WiFiUDP udpTelem;
+WebServer httpServer(80);
 Servo steerServo;
 volatile int16_t encCountL = 0, encCountR = 0;
 float rpmL = 0.0f, rpmR = 0.0f;
@@ -149,7 +154,49 @@ void setup() {
     WiFi.mode(WIFI_AP); WiFi.softAPConfig(AP_IP, AP_GATEWAY, AP_SUBNET);
     WiFi.softAP(AP_SSID, AP_PASS);
     Serial.printf("AP:%s IP:%s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
-    udp.begin(CMD_PORT); udpTelem.begin(TELEM_PORT); Serial.println("Ready!");
+    udp.begin(CMD_PORT); udpTelem.begin(TELEM_PORT);
+
+    // ── ArduinoOTA (прошивка через Arduino IDE) ───────────────────────────
+    ArduinoOTA.setHostname("rover-ap");
+    ArduinoOTA.onStart([]() { Serial.println("OTA Start"); stopMotors(); });
+    ArduinoOTA.onEnd([]()   { Serial.println("\nOTA End"); });
+    ArduinoOTA.onProgress([](unsigned int done, unsigned int total) {
+        Serial.printf("OTA %u%%\r", done * 100 / total);
+    });
+    ArduinoOTA.onError([](ota_error_t e) {
+        Serial.printf("OTA Error[%u]\n", e);
+    });
+    ArduinoOTA.begin();
+
+    // ── HTTP OTA /update (прошивка через Android-приложение) ─────────────
+    httpServer.on("/update", HTTP_POST,
+        []() {  // onComplete
+            httpServer.send(200, "text/plain", Update.hasError() ? "FAIL" : "OK");
+            if (!Update.hasError()) { delay(500); ESP.restart(); }
+        },
+        []() {  // onUpload (multipart handler)
+            HTTPUpload& upload = httpServer.upload();
+            if (upload.status == UPLOAD_FILE_START) {
+                Serial.printf("HTTP OTA: %s\n", upload.filename.c_str());
+                stopMotors();
+                if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+                    Update.printError(Serial);
+                }
+            } else if (upload.status == UPLOAD_FILE_WRITE) {
+                if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+                    Update.printError(Serial);
+                }
+            } else if (upload.status == UPLOAD_FILE_END) {
+                if (Update.end(true)) {
+                    Serial.printf("HTTP OTA OK: %u bytes\n", upload.totalSize);
+                } else {
+                    Update.printError(Serial);
+                }
+            }
+        }
+    );
+    httpServer.begin();
+    Serial.println("Ready!");
 }
 
 void loop() {
@@ -159,6 +206,8 @@ void loop() {
         remoteIP = udp.remoteIP(); remotePort = udp.remotePort(); haveRemote = true;
         parseCommand(buf);
     }
+    ArduinoOTA.handle();
+    httpServer.handleClient();
     updateRpm(); checkWatchdog(); sendTelemetry(); delay(5);
 }
 
