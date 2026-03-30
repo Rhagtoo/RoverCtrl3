@@ -84,6 +84,18 @@ class CommandSender {
         }
     }
 
+    /** Отправить VCAL команду — прямая установка виртуального угла тилта (калибровка) */
+    fun sendVcal(angle: Float) {
+        val clamped = angle.coerceIn(0f, 180f)
+        val msg = "VCAL:${String.format("%.1f", clamped)}\n"
+        scope.launch {
+            val addr = xiaoAddr
+            if (addr != null) {
+                sendRaw(msg.toByteArray(), addr, xiaoPort)
+            }
+        }
+    }
+
     fun sendEmergencyStop() {
         scope.launch {
             val addr = roverAddr

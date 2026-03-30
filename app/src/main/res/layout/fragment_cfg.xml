@@ -44,7 +44,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="ROVER (XIAO ESP32S3 — AP Host)"
+            android:text="ROVER (ESP32-S3 — AP Host)"
             android:textColor="#00E676"
             android:textSize="13sp"
             android:textStyle="bold"
@@ -200,10 +200,115 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="v2.0 AP Mode — Rover creates WiFi hotspot"
+            android:text="v2.5 AP Mode — Rover creates WiFi hotspot"
             android:textColor="#666666"
             android:textSize="11sp"
             android:layout_marginTop="8dp" />
+
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- ── TILT CALIBRATION ──────────────────────────────────────────── -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#333333"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="TILT CALIBRATION"
+            android:textColor="#E040FB"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Virtual angle / target / PWM (live from turret)"
+            android:textColor="#888888"
+            android:textSize="11sp"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Live status line -->
+        <TextView
+            android:id="@+id/tv_tilt_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="-- not connected --"
+            android:textColor="#888888"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace"
+            android:gravity="center"
+            android:background="#222222"
+            android:padding="10dp"
+            android:layout_marginBottom="10dp" />
+
+        <!-- +/- buttons row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="8dp">
+
+            <Button
+                android:id="@+id/btn_tilt_m5"
+                android:layout_width="56dp"
+                android:layout_height="44dp"
+                android:text="-5°"
+                android:textSize="13sp"
+                android:backgroundTint="#555555"
+                android:layout_marginEnd="4dp" />
+
+            <Button
+                android:id="@+id/btn_tilt_m1"
+                android:layout_width="56dp"
+                android:layout_height="44dp"
+                android:text="-1°"
+                android:textSize="13sp"
+                android:backgroundTint="#555555"
+                android:layout_marginEnd="8dp" />
+
+            <Button
+                android:id="@+id/btn_tilt_reset"
+                android:layout_width="72dp"
+                android:layout_height="44dp"
+                android:text="90°"
+                android:textSize="13sp"
+                android:backgroundTint="#7C4DFF" />
+
+            <Button
+                android:id="@+id/btn_tilt_p1"
+                android:layout_width="56dp"
+                android:layout_height="44dp"
+                android:text="+1°"
+                android:textSize="13sp"
+                android:backgroundTint="#555555"
+                android:layout_marginStart="8dp" />
+
+            <Button
+                android:id="@+id/btn_tilt_p5"
+                android:layout_width="56dp"
+                android:layout_height="44dp"
+                android:text="+5°"
+                android:textSize="13sp"
+                android:backgroundTint="#555555"
+                android:layout_marginStart="4dp" />
+
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Adjust if camera position doesn't match virtual angle.\nButtons send VCAL command to directly set virtual angle."
+            android:textColor="#666666"
+            android:textSize="10sp"
+            android:layout_marginBottom="4dp" />
 
         <!-- ═══════════════════════════════════════════════════════════════ -->
         <!-- ── OTA FIRMWARE UPDATE ──────────────────────────────────────── -->

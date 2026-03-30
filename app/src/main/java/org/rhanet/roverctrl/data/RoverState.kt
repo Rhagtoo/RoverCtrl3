@@ -90,8 +90,8 @@ data class ConnectionConfig(
     }
 
     val turretStreamUrl: String get() = "http://$xiaoIp:$xiaoStreamPort/stream"
-    val turretCaptureUrl: String get() = "http://$xiaoIp/capture"
-    val turretStatusUrl: String get() = "http://$xiaoIp/status"
+    val turretCaptureUrl: String get() = "http://$xiaoIp:$xiaoStreamPort/capture"
+    val turretStatusUrl: String get() = "http://$xiaoIp:$xiaoStreamPort/status"
 
     fun isValid(): Boolean {
         val ipRegex = Regex("""^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$""")

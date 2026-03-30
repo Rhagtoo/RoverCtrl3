@@ -11,12 +11,12 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- Слой 2: PiP (top-left) -->
+    <!-- Слой 2: PiP (top-right) -->
     <FrameLayout
         android:id="@+id/pip_container"
         android:layout_width="180dp"
         android:layout_height="135dp"
-        android:layout_gravity="top|start"
+        android:layout_gravity="top|end"
         android:layout_margin="4dp"
         android:background="#55000000"
         android:visibility="gone">

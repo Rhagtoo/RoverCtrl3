@@ -1,9 +1,13 @@
 /**
- * turret_client.ino v2.4
+ * turret_client.ino v2.5
  * + OTA прошивка: ArduinoOTA (Arduino IDE) + HTTP POST /update (Android app, port 80)
+ * + Asymmetric tilt speeds: раздельные °/с вверх и вниз (гравитация)
+ * + Drift correction: подтяжка virtual→target в deadband
+ * + VCAL команда: прямая установка virtualTiltAngle из приложения
+ * + JPEG quality 8 (было 12)
  * Virtual angle для CR tilt серво
  * PAN: позиционное. TILT: CR + PID → ведёт себя как позиционное.
- * КАЛИБРОВКА: TILT_NEUTRAL (стоп), TILT_DEG_PER_SEC (скорость)
+ * КАЛИБРОВКА: TILT_NEUTRAL (стоп), TILT_DEG_PER_SEC_UP/DOWN (скорость)
  */
 #include <WiFi.h>
 #include <WiFiUdp.h>
@@ -39,13 +43,16 @@ const IPAddress STATIC_IP(192,168,4,2),GATEWAY(192,168,4,1),SUBNET(255,255,255,0
 #define RECONNECT_INTERVAL_MS 5000
 
 // ═══ CR Tilt — КАЛИБРОВАТЬ! ═══
-#define TILT_NEUTRAL      90     // PWM = стоп (подстрой 88-92)
-#define TILT_DEADBAND     3.0f   // ±3° = на месте
-#define TILT_KP           1.2f   // P-gain (1.0-2.0)
-#define TILT_MAX_SPEED    50     // макс отклонение от neutral
-#define TILT_DEG_PER_SEC  90.0f  // °/сек при макс скорости (замерить!)
-#define TILT_MIN_ANGLE    10.0f
-#define TILT_MAX_ANGLE    170.0f
+#define TILT_NEUTRAL         90      // PWM = стоп (подстрой 88-92)
+#define TILT_DEADBAND        3.0f    // ±3° = на месте
+#define TILT_KP              1.2f    // P-gain (1.0-2.0)
+#define TILT_MAX_SPEED       50      // макс отклонение от neutral
+#define TILT_DEG_PER_SEC_UP  60.0f   // °/сек вверх (против гравитации — медленнее)
+#define TILT_DEG_PER_SEC_DN  90.0f   // °/сек вниз  (по гравитации — быстрее)
+#define TILT_MIN_ANGLE       10.0f
+#define TILT_MAX_ANGLE       170.0f
+// Drift correction: в deadband подтягиваем virtual к target (°/сек)
+#define TILT_DRIFT_CORRECT   30.0f
 
 WiFiUDP udp; Servo servoPan, servoTilt; httpd_handle_t httpd = NULL;
 WebServer otaServer(80);
@@ -64,7 +71,7 @@ bool setupCamera() {
     c.pin_sccb_sda=SIOD_GPIO_NUM; c.pin_sccb_scl=SIOC_GPIO_NUM;
     c.pin_pwdn=PWDN_GPIO_NUM; c.pin_reset=RESET_GPIO_NUM;
     c.xclk_freq_hz=20000000; c.pixel_format=PIXFORMAT_JPEG;
-    c.frame_size=FRAMESIZE_QVGA; c.jpeg_quality=12;
+    c.frame_size=FRAMESIZE_QVGA; c.jpeg_quality=8;
     c.fb_count=2; c.grab_mode=CAMERA_GRAB_LATEST;
     return esp_camera_init(&c) == ESP_OK;
 }
@@ -101,10 +108,12 @@ esp_err_t capture_handler(httpd_req_t* r) {
 }
 
 esp_err_t status_handler(httpd_req_t* r) {
-    char b[256];
+    char b[320];
     snprintf(b, sizeof(b),
-        "{\"pan\":%d,\"tilt\":%.1f,\"tiltTarget\":%.1f,\"tiltPwm\":%d,\"heap\":%d,\"rssi\":%d}",
+        "{\"pan\":%d,\"tilt\":%.1f,\"tiltTarget\":%.1f,\"tiltPwm\":%d,"
+        "\"dpsUp\":%.0f,\"dpsDn\":%.0f,\"heap\":%d,\"rssi\":%d}",
         currentPan, virtualTiltAngle, tiltTargetAngle, currentTiltPwm,
+        TILT_DEG_PER_SEC_UP, TILT_DEG_PER_SEC_DN,
         ESP.getFreeHeap(), WiFi.RSSI());
     httpd_resp_set_type(r, "application/json");
     httpd_resp_set_hdr(r, "Access-Control-Allow-Origin", "*");
@@ -128,6 +137,16 @@ void parseCommand(const char* cmd) {
     int pan = 0, tilt = 0; bool hp = false, ht = false; char* ptr;
     if ((ptr = strstr(cmd, "PAN:")) != NULL) { pan = atoi(ptr + 4); hp = true; }
     if ((ptr = strstr(cmd, "TILT:")) != NULL) { tilt = atoi(ptr + 5); ht = true; }
+
+    // VCAL:<angle> — прямая установка виртуального угла (калибровка из приложения)
+    if ((ptr = strstr(cmd, "VCAL:")) != NULL) {
+        float cal = atof(ptr + 5);
+        cal = constrain(cal, 0.0f, 180.0f);
+        virtualTiltAngle = cal;
+        tiltTargetAngle = cal;
+        Serial.printf("VCAL: virtual=%.1f\n", cal);
+    }
+
     if (hp) { pan = constrain(pan, -90, 90); targetPan = map(pan, -90, 90, 180, 0); panDirty = true; }
     if (ht) {
         tilt = constrain(tilt, -90, 90);
@@ -155,6 +174,14 @@ void updateServos() {
             servoTilt.write(TILT_NEUTRAL);
             currentTiltPwm = TILT_NEUTRAL;
         }
+        // Drift correction: подтягиваем virtual к target.
+        // Когда серво остановлен, накопленная ошибка интегратора
+        // плавно обнуляется — virtual сходится к target.
+        if (fabsf(error) > 0.1f) {
+            float corr = (error > 0 ? 1.0f : -1.0f) * TILT_DRIFT_CORRECT * dt;
+            if (fabsf(corr) > fabsf(error)) corr = error;
+            virtualTiltAngle += corr;
+        }
     } else {
         // P-регулятор: скорость ∝ ошибке
         float speed = constrain(error * TILT_KP, -(float)TILT_MAX_SPEED, (float)TILT_MAX_SPEED);
@@ -166,8 +193,12 @@ void updateServos() {
         servoTilt.write(pwm);
         currentTiltPwm = pwm;
 
-        // Обновляем оценку позиции (open-loop интеграция)
-        float actualDegPerSec = (float)(pwm - TILT_NEUTRAL) / (float)TILT_MAX_SPEED * TILT_DEG_PER_SEC;
+        // Обновляем оценку позиции (open-loop интеграция).
+        // Раздельные скорости: вверх (angle растёт) против гравитации — медленнее,
+        // вниз (angle падает) по гравитации — быстрее.
+        float speedFrac = (float)(pwm - TILT_NEUTRAL) / (float)TILT_MAX_SPEED;
+        float degPerSec = (speedFrac > 0) ? TILT_DEG_PER_SEC_UP : TILT_DEG_PER_SEC_DN;
+        float actualDegPerSec = speedFrac * degPerSec;
         virtualTiltAngle += actualDegPerSec * dt;
         virtualTiltAngle = constrain(virtualTiltAngle, 0.0f, 180.0f);
     }
@@ -211,12 +242,13 @@ void udpTask(void* p) {
 
 void setup() {
     Serial.begin(115200);
-    Serial.println("\n=== Turret v2.3 CR virtual angle ===");
+    Serial.println("\n=== Turret v2.5 CR asymmetric tilt + VCAL ===");
     ESP32PWM::allocateTimer(1); ESP32PWM::allocateTimer(2);
     servoPan.setPeriodHertz(50); servoPan.attach(SERVO_PAN, 500, 2400); servoPan.write(90);
     servoTilt.setPeriodHertz(50); servoTilt.attach(SERVO_TILT, 500, 2400); servoTilt.write(TILT_NEUTRAL);
     lastTiltLoopMs = millis();
-    Serial.printf("PAN=positional TILT=CR(neutral=%d Kp=%.1f deg/s=%.0f)\n", TILT_NEUTRAL, TILT_KP, TILT_DEG_PER_SEC);
+    Serial.printf("PAN=positional TILT=CR(neutral=%d Kp=%.1f up=%.0f dn=%.0f)\n",
+        TILT_NEUTRAL, TILT_KP, TILT_DEG_PER_SEC_UP, TILT_DEG_PER_SEC_DN);
     if (!setupCamera()) Serial.println("Camera FAIL"); else Serial.println("Camera OK");
     connectWiFi();
     udp.begin(UDP_PORT);

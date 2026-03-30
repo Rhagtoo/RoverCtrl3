@@ -3,6 +3,7 @@ package org.rhanet.roverctrl.ui.cfg
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -18,15 +19,27 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import org.rhanet.roverctrl.R
 import org.rhanet.roverctrl.data.AppSettings
 import org.rhanet.roverctrl.data.ConnectionConfig
 import org.rhanet.roverctrl.network.OtaUploader
 import org.rhanet.roverctrl.ui.RoverViewModel
+import java.net.HttpURLConnection
+import java.net.URL
 
 class CfgFragment : Fragment() {
+
+    companion object {
+        private const val TAG = "CfgFragment"
+        private const val TILT_POLL_MS = 500L
+    }
 
     private val vm: RoverViewModel by activityViewModels()
 
@@ -61,6 +74,16 @@ class CfgFragment : Fragment() {
     private lateinit var tvDriveSteerVal: TextView
     private lateinit var tvCamPanVal:     TextView
     private lateinit var tvCamTiltVal:    TextView
+
+    // Tilt calibration
+    private lateinit var tvTiltStatus: TextView
+    private lateinit var btnTiltM5:    Button
+    private lateinit var btnTiltM1:    Button
+    private lateinit var btnTiltReset: Button
+    private lateinit var btnTiltP1:    Button
+    private lateinit var btnTiltP5:    Button
+    private var tiltPollJob: Job? = null
+    private var lastKnownVirtual: Float = 90f
 
     private var selectedBinUri: Uri? = null
 
@@ -110,10 +133,19 @@ class CfgFragment : Fragment() {
         tvCamPanVal     = view.findViewById(R.id.tv_cam_pan_val)
         tvCamTiltVal    = view.findViewById(R.id.tv_cam_tilt_val)
 
+        // Tilt calibration
+        tvTiltStatus = view.findViewById(R.id.tv_tilt_status)
+        btnTiltM5    = view.findViewById(R.id.btn_tilt_m5)
+        btnTiltM1    = view.findViewById(R.id.btn_tilt_m1)
+        btnTiltReset = view.findViewById(R.id.btn_tilt_reset)
+        btnTiltP1    = view.findViewById(R.id.btn_tilt_p1)
+        btnTiltP5    = view.findViewById(R.id.btn_tilt_p5)
+
         loadSavedConfig()
         loadSensitivity()
         setupOta()
         setupSensitivitySliders()
+        setupTiltCalibration()
 
         btnConnect.setOnClickListener {
             if (vm.connected.value) disconnect() else connect()
@@ -185,11 +217,15 @@ class CfgFragment : Fragment() {
             tvStatus.setTextColor(0xFF00E676.toInt())
             btnConnect.text = "Disconnect"
             setFieldsEnabled(false)
+            startTiltPolling()
         } else {
             tvStatus.text = "Disconnected"
             tvStatus.setTextColor(0xFFFF5252.toInt())
             btnConnect.text = "Connect"
             setFieldsEnabled(true)
+            stopTiltPolling()
+            tvTiltStatus.text = "-- not connected --"
+            tvTiltStatus.setTextColor(0xFF888888.toInt())
         }
     }
 
@@ -201,6 +237,84 @@ class CfgFragment : Fragment() {
         etXiaoPort.isEnabled       = enabled
         etXiaoStreamPort.isEnabled = enabled
         btnReset.isEnabled         = enabled
+    }
+
+    // ── Tilt Calibration ──────────────────────────────────────────────────
+
+    private fun setupTiltCalibration() {
+        btnTiltM5.setOnClickListener    { sendVcal(lastKnownVirtual - 5f) }
+        btnTiltM1.setOnClickListener    { sendVcal(lastKnownVirtual - 1f) }
+        btnTiltReset.setOnClickListener { sendVcal(90f) }
+        btnTiltP1.setOnClickListener    { sendVcal(lastKnownVirtual + 1f) }
+        btnTiltP5.setOnClickListener    { sendVcal(lastKnownVirtual + 5f) }
+    }
+
+    private fun sendVcal(angle: Float) {
+        val clamped = angle.coerceIn(0f, 180f)
+        lastKnownVirtual = clamped
+        vm.sender.sendVcal(clamped)
+    }
+
+    private fun startTiltPolling() {
+        stopTiltPolling()
+        val ip = etXiaoIp.text.toString().trim().ifEmpty { "192.168.4.2" }
+        val port = etXiaoStreamPort.text.toString().toIntOrNull() ?: 81
+        val statusUrl = "http://$ip:$port/status"
+
+        tiltPollJob = viewLifecycleOwner.lifecycleScope.launch {
+            while (true) {
+                try {
+                    val json = withContext(Dispatchers.IO) { fetchStatus(statusUrl) }
+                    if (json != null) {
+                        val virt   = json.optDouble("tilt", 90.0).toFloat()
+                        val target = json.optDouble("tiltTarget", 90.0).toFloat()
+                        val pwm    = json.optInt("tiltPwm", 90)
+                        val pan    = json.optInt("pan", 90)
+                        lastKnownVirtual = virt
+
+                        tvTiltStatus.text = String.format(
+                            "V:%.1f°  T:%.1f°  PWM:%d  PAN:%d", virt, target, pwm, pan)
+                        tvTiltStatus.setTextColor(
+                            if (kotlin.math.abs(virt - target) < 3f) 0xFF00E676.toInt()
+                            else 0xFFFFAB00.toInt()
+                        )
+                    } else {
+                        tvTiltStatus.text = "turret offline"
+                        tvTiltStatus.setTextColor(0xFFFF5252.toInt())
+                    }
+                } catch (e: Exception) {
+                    tvTiltStatus.text = "poll error"
+                    tvTiltStatus.setTextColor(0xFFFF5252.toInt())
+                }
+                delay(TILT_POLL_MS)
+            }
+        }
+    }
+
+    private fun stopTiltPolling() {
+        tiltPollJob?.cancel()
+        tiltPollJob = null
+    }
+
+    private fun fetchStatus(url: String): JSONObject? {
+        return try {
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = 400
+            conn.readTimeout = 400
+            conn.requestMethod = "GET"
+            val code = conn.responseCode
+            if (code == 200) {
+                val body = conn.inputStream.bufferedReader().readText()
+                conn.disconnect()
+                JSONObject(body)
+            } else {
+                conn.disconnect()
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchStatus: ${e.message}")
+            null
+        }
     }
 
     // ── OTA ───────────────────────────────────────────────────────────────
@@ -311,5 +425,10 @@ class CfgFragment : Fragment() {
             camTiltSens    = AppSettings.progressToSens(sbCamTilt.progress)
         )
         vm.updateSensitivity(requireContext(), s)
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        stopTiltPolling()
     }
 }
