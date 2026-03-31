@@ -247,6 +247,9 @@ class VideoFragment : Fragment() {
             tvMainSourceLabel.text = "XIAO"
             tvMainSourceLabel.visibility = View.VISIBLE
             tvPipSourceLabel.text = "PHONE"
+            // Скрываем PiP, потому что он не может показывать камеру телефона
+            pipContainer.visibility = View.GONE
+            btnPipVideo.isChecked = false
         } else {
             ivXiaoMain.visibility = View.GONE
             previewView.visibility = View.VISIBLE
