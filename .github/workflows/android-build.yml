@@ -21,10 +21,19 @@ jobs:
     
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
+      with:
+        api-level: 34
+        build-tools-version: "34.0.0"
+        ndk-version: "25.2.9519653"
+        cmake-version: "3.22.1"
     
     - name: Create local.properties
       run: |
         echo "sdk.dir=$ANDROID_HOME" > local.properties
+    
+    - name: Accept Android SDK licenses
+      run: |
+        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
     
     - name: Build with Gradle
       run: ./gradlew assembleDebug
