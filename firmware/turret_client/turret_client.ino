@@ -6,7 +6,7 @@
  * + VCAL команда: прямая установка virtualTiltAngle из приложения
  * + JPEG quality 8 (было 12)
  * Virtual angle для CR tilt серво
- * PAN: позиционное. TILT: CR + PID → ведёт себя как позиционное.
+ * PAN: позиционное. TILT: CR + позиционный контроллер с постоянной скоростью → ведёт себя как позиционное.
  * КАЛИБРОВКА: TILT_NEUTRAL (стоп), TILT_DEG_PER_SEC_UP/DOWN (скорость)
  */
 #include <WiFi.h>
@@ -45,7 +45,7 @@ const IPAddress STATIC_IP(192,168,4,2),GATEWAY(192,168,4,1),SUBNET(255,255,255,0
 // ═══ CR Tilt — КАЛИБРОВАТЬ! ═══
 #define TILT_NEUTRAL         90      // PWM = стоп (подстрой 88-92)
 #define TILT_DEADBAND        3.0f    // ±3° = на месте
-#define TILT_KP              1.2f    // P-gain (1.0-2.0)
+// #define TILT_KP              1.2f    // P-gain (1.0-2.0) — не используется в позиционном режиме
 #define TILT_MAX_SPEED       50      // макс отклонение от neutral
 #define TILT_DEG_PER_SEC_UP  60.0f   // °/сек вверх (против гравитации — медленнее)
 #define TILT_DEG_PER_SEC_DN  90.0f   // °/сек вниз  (по гравитации — быстрее)
@@ -160,7 +160,7 @@ void updateServos() {
     // PAN — обычное позиционное серво
     if (panDirty) { servoPan.write(targetPan); currentPan = targetPan; panDirty = false; }
 
-    // TILT — PID регулятор для CR серво с виртуальным углом
+    // TILT — позиционный контроллер с постоянной скоростью (как PAN)
     unsigned long now = millis();
     float dt = (now - lastTiltLoopMs) / 1000.0f;
     lastTiltLoopMs = now;
@@ -175,28 +175,22 @@ void updateServos() {
             currentTiltPwm = TILT_NEUTRAL;
         }
         // Drift correction: подтягиваем virtual к target.
-        // Когда серво остановлен, накопленная ошибка интегратора
-        // плавно обнуляется — virtual сходится к target.
         if (fabsf(error) > 0.1f) {
             float corr = (error > 0 ? 1.0f : -1.0f) * TILT_DRIFT_CORRECT * dt;
             if (fabsf(corr) > fabsf(error)) corr = error;
             virtualTiltAngle += corr;
         }
     } else {
-        // P-регулятор: скорость ∝ ошибке
-        float speed = constrain(error * TILT_KP, -(float)TILT_MAX_SPEED, (float)TILT_MAX_SPEED);
-        // Мин скорость чтобы серво реально крутилось
-        if (speed > 0 && speed < 8) speed = 8;
-        if (speed < 0 && speed > -8) speed = -8;
-
-        int pwm = constrain(TILT_NEUTRAL + (int)speed, 0, 180);
+        // Определяем направление и задаём постоянную скорость
+        int speed = (error > 0) ? TILT_MAX_SPEED : -TILT_MAX_SPEED;
+        int pwm = constrain(TILT_NEUTRAL + speed, 0, 180);
         servoTilt.write(pwm);
         currentTiltPwm = pwm;
 
         // Обновляем оценку позиции (open-loop интеграция).
         // Раздельные скорости: вверх (angle растёт) против гравитации — медленнее,
         // вниз (angle падает) по гравитации — быстрее.
-        float speedFrac = (float)(pwm - TILT_NEUTRAL) / (float)TILT_MAX_SPEED;
+        float speedFrac = (float)speed / (float)TILT_MAX_SPEED; // +1 или -1
         float degPerSec = (speedFrac > 0) ? TILT_DEG_PER_SEC_UP : TILT_DEG_PER_SEC_DN;
         float actualDegPerSec = speedFrac * degPerSec;
         virtualTiltAngle += actualDegPerSec * dt;
@@ -247,8 +241,8 @@ void setup() {
     servoPan.setPeriodHertz(50); servoPan.attach(SERVO_PAN, 500, 2400); servoPan.write(90);
     servoTilt.setPeriodHertz(50); servoTilt.attach(SERVO_TILT, 500, 2400); servoTilt.write(TILT_NEUTRAL);
     lastTiltLoopMs = millis();
-    Serial.printf("PAN=positional TILT=CR(neutral=%d Kp=%.1f up=%.0f dn=%.0f)\n",
-        TILT_NEUTRAL, TILT_KP, TILT_DEG_PER_SEC_UP, TILT_DEG_PER_SEC_DN);
+    Serial.printf("PAN=positional TILT=CR positional(neutral=%d maxSpeed=%d up=%.0f dn=%.0f)\n",
+        TILT_NEUTRAL, TILT_MAX_SPEED, TILT_DEG_PER_SEC_UP, TILT_DEG_PER_SEC_DN);
     if (!setupCamera()) Serial.println("Camera FAIL"); else Serial.println("Camera OK");
     connectWiFi();
     udp.begin(UDP_PORT);
