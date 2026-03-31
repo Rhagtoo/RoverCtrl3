@@ -163,7 +163,7 @@ class VideoFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch {
             vm.trackMode.collectLatest { mode ->
-                overlay.trackingActive = mode != TrackingMode.MANUAL && mode != TrackingMode.GYRO_TILT
+                updateOverlayVisibility(mode)
                 tvStatus.text = when (mode) {
                     TrackingMode.MANUAL       -> "Manual"
                     TrackingMode.LASER_DOT    -> "Laser"
@@ -260,12 +260,9 @@ class VideoFragment : Fragment() {
     private fun setSwapped(s: Boolean) {
         swapped = s
         val mode = vm.trackMode.value
-        val showTrackingOverlay = mode == TrackingMode.LASER_DOT || mode == TrackingMode.OBJECT_TRACK
         if (swapped) {
             ivXiaoMain.visibility = View.VISIBLE
             previewView.visibility = View.INVISIBLE
-            overlay.visibility = View.GONE
-            overlayXiao.visibility = if (showTrackingOverlay) View.VISIBLE else View.GONE
             tvMainSourceLabel.text = "XIAO"
             tvMainSourceLabel.visibility = View.VISIBLE
             tvPipSourceLabel.text = "PHONE"
@@ -275,12 +272,25 @@ class VideoFragment : Fragment() {
         } else {
             ivXiaoMain.visibility = View.GONE
             previewView.visibility = View.VISIBLE
-            overlay.visibility = if (showTrackingOverlay) View.VISIBLE else View.GONE
-            overlayXiao.visibility = View.GONE
             tvMainSourceLabel.visibility = View.GONE
             tvPipSourceLabel.text = "TURRET"
         }
+        updateOverlayVisibility(mode)
         updateXiaoAnalysis()
+    }
+
+    private fun updateOverlayVisibility(mode: TrackingMode) {
+        val showTrackingOverlay = mode == TrackingMode.LASER_DOT || mode == TrackingMode.OBJECT_TRACK
+        val trackingActive = mode != TrackingMode.MANUAL && mode != TrackingMode.GYRO_TILT
+        overlay.trackingActive = trackingActive
+        overlayXiao.trackingActive = trackingActive
+        if (swapped) {
+            overlay.visibility = View.GONE
+            overlayXiao.visibility = if (showTrackingOverlay) View.VISIBLE else View.GONE
+        } else {
+            overlay.visibility = if (showTrackingOverlay) View.VISIBLE else View.GONE
+            overlayXiao.visibility = View.GONE
+        }
     }
 
     // ── XIAO Frame Analysis (swapped + tracking) ─────────────────────────
