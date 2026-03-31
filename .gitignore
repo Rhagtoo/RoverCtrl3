@@ -17,6 +17,7 @@
 *.class
 *.jar
 *.war
+!gradle/wrapper/gradle-wrapper.jar
 
 # OS
 .DS_Store
