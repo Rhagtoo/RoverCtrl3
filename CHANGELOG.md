@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Improved project structure documentation
+- Turret tilt control: replaced P‑regulator with positional controller with constant speed (behaves like pan servo)
 
 ### Fixed
 - 
