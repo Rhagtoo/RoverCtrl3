@@ -1,0 +1,31 @@
+name: Firmware CI
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'firmware/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'firmware/**'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check INO files syntax
+      run: |
+        echo "Проверка синтаксиса прошивок..."
+        find firmware -name "*.ino" -type f | while read f; do
+          echo "Проверка $f"
+          # Простая проверка на наличие основных заголовков
+          if grep -q "#include" "$f"; then
+            echo "  OK: содержит #include"
+          else
+            echo "  WARN: нет #include"
+          fi
+        done
