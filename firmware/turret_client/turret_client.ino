@@ -71,7 +71,7 @@ bool setupCamera() {
     c.pin_sccb_sda=SIOD_GPIO_NUM; c.pin_sccb_scl=SIOC_GPIO_NUM;
     c.pin_pwdn=PWDN_GPIO_NUM; c.pin_reset=RESET_GPIO_NUM;
     c.xclk_freq_hz=20000000; c.pixel_format=PIXFORMAT_JPEG;
-    c.frame_size=FRAMESIZE_QVGA; c.jpeg_quality=8;
+    c.frame_size=FRAMESIZE_VGA; c.jpeg_quality=8;
     c.fb_count=2; c.grab_mode=CAMERA_GRAB_LATEST;
     return esp_camera_init(&c) == ESP_OK;
 }
