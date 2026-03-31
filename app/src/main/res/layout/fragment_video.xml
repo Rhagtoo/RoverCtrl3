@@ -29,7 +29,7 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <!-- Overlay трекинга -->
+    <!-- Overlay трекинга для камеры телефона -->
     <org.rhanet.roverctrl.ui.video.TrackingOverlayView
         android:id="@+id/overlay"
         android:layout_width="0dp"
@@ -38,6 +38,17 @@
         app:layout_constraintBottom_toBottomOf="@id/preview_view"
         app:layout_constraintStart_toStartOf="@id/preview_view"
         app:layout_constraintEnd_toEndOf="@id/preview_view" />
+
+    <!-- Overlay трекинга для камеры XIAO (показывается при swapped) -->
+    <org.rhanet.roverctrl.ui.video.TrackingOverlayView
+        android:id="@+id/overlay_xiao"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/iv_xiao_main"
+        app:layout_constraintBottom_toBottomOf="@id/iv_xiao_main"
+        app:layout_constraintStart_toStartOf="@id/iv_xiao_main"
+        app:layout_constraintEnd_toEndOf="@id/iv_xiao_main" />
 
     <!-- PiP: MJPEG турели -->
     <FrameLayout

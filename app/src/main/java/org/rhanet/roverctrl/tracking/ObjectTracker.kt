@@ -129,8 +129,15 @@ class ObjectTracker(
             return TrackResult(false, 0f, 0f, null)
         }
 
-        val errX = best.cx - 0.5f
-        val errY = best.cy - 0.5f
+        var targetCx = best.cx
+        var targetCy = best.cy
+        // Для cat смещаем цель к нижней части рамки (под ноги)
+        if (best.label == "cat") {
+            targetCy = (best.cy + best.h / 2).coerceAtMost(1.0f)
+        }
+
+        val errX = targetCx - 0.5f
+        val errY = targetCy - 0.5f
         val pan  = pidPan.updateWithDeadband(errX)
         val tilt = pidTilt.updateWithDeadband(errY)
 
@@ -225,6 +232,9 @@ class ObjectTracker(
             } else {
                 if (maxScore < confThresh) continue
             }
+
+            // Фильтр: только cat (15) и person (0)
+            if (maxCls != 0 && maxCls != 15) continue
 
             boxes += Box(
                 cx = cx / scale,

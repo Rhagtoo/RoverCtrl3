@@ -21,6 +21,8 @@ import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
@@ -57,6 +59,7 @@ class VideoFragment : Fragment() {
 
     private lateinit var previewView:       PreviewView
     private lateinit var overlay:           TrackingOverlayView
+    private lateinit var overlayXiao:       TrackingOverlayView
     private lateinit var spinnerMode:       Spinner
     private lateinit var tvFps:             TextView
     private lateinit var tvStatus:          TextView
@@ -82,6 +85,8 @@ class VideoFragment : Fragment() {
     private var swapped = false
     private var laserTracker:  LaserTracker?  = null
     private var objectTracker: ObjectTracker? = null
+
+    private fun trackingOverlay(): TrackingOverlayView = if (swapped) overlayXiao else overlay
     private var cameraProvider: ProcessCameraProvider? = null
     private var xiaoAnalysisJob: Job? = null
 
@@ -106,6 +111,7 @@ class VideoFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         previewView        = view.findViewById(R.id.preview_view)
         overlay            = view.findViewById(R.id.overlay)
+        overlayXiao        = view.findViewById(R.id.overlay_xiao)
         spinnerMode        = view.findViewById(R.id.spinner_mode)
         tvFps              = view.findViewById(R.id.tv_fps)
         tvStatus           = view.findViewById(R.id.tv_status)
@@ -123,6 +129,19 @@ class VideoFragment : Fragment() {
         tvDriveLabel       = view.findViewById(R.id.tv_drive_label_video)
         tvCamLabel         = view.findViewById(R.id.tv_cam_label_video)
         btnLaserVideo      = view.findViewById(R.id.btn_laser_video)
+
+        // edge-to-edge: insets для верхней панели и правого джойстика
+        val toolbarVideo = view.findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar_video)
+        ViewCompat.setOnApplyWindowInsetsListener(toolbarVideo) { v, insets ->
+            val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(v.paddingLeft, sb.top, v.paddingRight, v.paddingBottom)
+            insets
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(joystickCam) { v, insets ->
+            val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(v.paddingLeft, v.paddingTop, sb.right, v.paddingBottom)
+            insets
+        }
 
         // Латенси всегда видна — начальное состояние
         tvLatency.text = "-- ms"
@@ -240,10 +259,13 @@ class VideoFragment : Fragment() {
 
     private fun setSwapped(s: Boolean) {
         swapped = s
+        val mode = vm.trackMode.value
+        val showTrackingOverlay = mode == TrackingMode.LASER_DOT || mode == TrackingMode.OBJECT_TRACK
         if (swapped) {
             ivXiaoMain.visibility = View.VISIBLE
             previewView.visibility = View.INVISIBLE
             overlay.visibility = View.GONE
+            overlayXiao.visibility = if (showTrackingOverlay) View.VISIBLE else View.GONE
             tvMainSourceLabel.text = "XIAO"
             tvMainSourceLabel.visibility = View.VISIBLE
             tvPipSourceLabel.text = "PHONE"
@@ -253,7 +275,8 @@ class VideoFragment : Fragment() {
         } else {
             ivXiaoMain.visibility = View.GONE
             previewView.visibility = View.VISIBLE
-            overlay.visibility = View.VISIBLE
+            overlay.visibility = if (showTrackingOverlay) View.VISIBLE else View.GONE
+            overlayXiao.visibility = View.GONE
             tvMainSourceLabel.visibility = View.GONE
             tvPipSourceLabel.text = "TURRET"
         }
@@ -287,18 +310,22 @@ class VideoFragment : Fragment() {
                 latency.mark(ft, LatencyTracker.Stage.INFERENCE_END)
                 if (r != null && r.found) {
                     vm.setPanTilt(r.panDelta.toInt(), r.tiltDelta.toInt())
+                    val label = r.detection?.label ?: ""
+                    vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post { overlay.detection = r.detection }
-                } else handler.post { overlay.detection = null }
+                    handler.post { trackingOverlay().detection = r.detection }
+                } else handler.post { trackingOverlay().detection = null }
             }
             TrackingMode.OBJECT_TRACK -> {
                 val r = objectTracker?.process(bitmap)
                 latency.mark(ft, LatencyTracker.Stage.INFERENCE_END)
                 if (r != null && r.found) {
                     vm.setPanTilt(r.panDelta.toInt(), r.tiltDelta.toInt())
+                    val label = r.detection?.label ?: ""
+                    vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post { overlay.detection = r.detection }
-                } else handler.post { overlay.detection = null }
+                    handler.post { trackingOverlay().detection = r.detection }
+                } else handler.post { trackingOverlay().detection = null }
             }
             else -> {}
         }
@@ -409,18 +436,22 @@ class VideoFragment : Fragment() {
                 latency.mark(ft, LatencyTracker.Stage.INFERENCE_END)
                 if (r != null && r.found) {
                     vm.setPanTilt(r.panDelta.toInt(), r.tiltDelta.toInt())
+                    val label = r.detection?.label ?: ""
+                    vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post { overlay.detection = r.detection }
-                } else handler.post { overlay.detection = null }
+                    handler.post { trackingOverlay().detection = r.detection }
+                } else handler.post { trackingOverlay().detection = null }
             }
             TrackingMode.OBJECT_TRACK -> {
                 val r = objectTracker?.process(bitmap)
                 latency.mark(ft, LatencyTracker.Stage.INFERENCE_END)
                 if (r != null && r.found) {
                     vm.setPanTilt(r.panDelta.toInt(), r.tiltDelta.toInt())
+                    val label = r.detection?.label ?: ""
+                    vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post { overlay.detection = r.detection }
-                } else handler.post { overlay.detection = null }
+                    handler.post { trackingOverlay().detection = r.detection }
+                } else handler.post { trackingOverlay().detection = null }
             }
             else -> {}
         }
