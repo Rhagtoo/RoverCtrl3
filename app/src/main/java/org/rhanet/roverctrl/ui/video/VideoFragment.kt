@@ -130,18 +130,18 @@ class VideoFragment : Fragment() {
         tvCamLabel         = view.findViewById(R.id.tv_cam_label_video)
         btnLaserVideo      = view.findViewById(R.id.btn_laser_video)
 
-        // edge-to-edge: insets для верхней панели и правого джойстика
-        val toolbarVideo = view.findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar_video)
-        ViewCompat.setOnApplyWindowInsetsListener(toolbarVideo) { v, insets ->
-            val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(v.paddingLeft, sb.top, v.paddingRight, v.paddingBottom)
-            insets
-        }
-        ViewCompat.setOnApplyWindowInsetsListener(joystickCam) { v, insets ->
-            val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(v.paddingLeft, v.paddingTop, sb.right, v.paddingBottom)
-            insets
-        }
+        // edge-to-edge: insets для верхней панели и правого джойстика (временно отключено из-за краша)
+        // val toolbarVideo = view.findViewById<View>(R.id.toolbar_video)
+        // ViewCompat.setOnApplyWindowInsetsListener(toolbarVideo) { v, insets ->
+        //     val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+        //     v.setPadding(v.paddingLeft, sb.top, v.paddingRight, v.paddingBottom)
+        //     insets
+        // }
+        // ViewCompat.setOnApplyWindowInsetsListener(joystickCam) { v, insets ->
+        //     val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+        //     v.setPadding(v.paddingLeft, v.paddingTop, sb.right, v.paddingBottom)
+        //     insets
+        // }
 
         // Латенси всегда видна — начальное состояние
         tvLatency.text = "-- ms"
