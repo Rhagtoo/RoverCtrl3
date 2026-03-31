@@ -1,16 +1,16 @@
 # RoverCtrl
 
-Remote control system for a rover with autonomous object tracking.
+Система дистанционного управления ровером с автономным трекингом объектов.
 
-## Components
+## Компоненты
 
-| Component | Platform | Description |
-|-----------|----------|-------------|
-| Android App | Kotlin / Android Studio | Control, video, tracking |
-| Rover Firmware | ESP32-S3 (Arduino) | Motor, steering, encoders, laser |
-| Turret Firmware | XIAO ESP32S3 Sense (Arduino) | Pan/tilt camera, MJPEG stream |
+| Компонент | Платформа | Описание |
+|-----------|-----------|----------|
+| Android App | Kotlin / Android Studio | Управление, видео, трекинг |
+| Rover Firmware | ESP32-S3 (Arduino) | Мотор, руль, энкодеры, лазер |
+| Turret Firmware | XIAO ESP32S3 Sense (Arduino) | Pan/tilt камера, MJPEG стрим |
 
-## Architecture
+## Архитектура
 
 ```
 ┌─────────────────────────────────────┐
@@ -19,13 +19,13 @@ Remote control system for a rover with autonomous object tracking.
 │  WiFi AP "RoverAP"                  │
 │  IP: 192.168.4.1                    │
 │                                     │
-│  • DC motor + steering servo        │
-│  • PCNT encoders (440 CPR)          │
-│  • Laser                            │
-│  • 2 gears (GEAR 1/2)               │
+│  • DC мотор + серво руля            │
+│  • Энкодеры PCNT (440 CPR)          │
+│  • Лазер                            │
+│  • 2 передачи (GEAR 1/2)            │
 │  • Motor watchdog 500ms             │
-│  • Telemetry UDP :4211 (500ms)      │
-│  • Commands UDP :4210               │
+│  • Телеметрия UDP :4211 (500ms)     │
+│  • Команды UDP :4210                │
 └─────────────────────────────────────┘
                 │
     WiFi "RoverAP" / rover12345
@@ -37,63 +37,63 @@ Remote control system for a rover with autonomous object tracking.
 │ turret_client    │  │  Android App          │
 │ v2.3             │  │  (OnePlus 8T)         │
 │ XIAO ESP32S3    │  │                        │
-│ Sense            │  │  3 tabs:               │
-│ 192.168.4.2     │  │  • Control (joysticks  │
-│                  │  │    + HUD + 2D map)     │
-│ • Pan (positional)│  │  • Video (CameraX +  │
-│ • Tilt (CR+PID) │  │    MJPEG + tracking)   │
-│ • OV2640 camera │  │  • Settings (IP/ports) │
+│ Sense            │  │  3 вкладки:            │
+│ 192.168.4.2     │  │  • Control (джойстики  │
+│                  │  │    + HUD + 2D карта)   │
+│ • Pan (позиц.)  │  │  • Video (CameraX +    │
+│ • Tilt (CR+PID) │  │    MJPEG + трекинг)    │
+│ • OV2640 камера │  │  • Settings (IP/порты) │
 │ • MJPEG :81     │  │                        │
-│ • UDP :4210     │  │  Tracking modes:        │
+│ • UDP :4210     │  │  Режимы трекинга:       │
 └─────────────────┘  │  Manual / Laser / YOLO │
                       │  / Gyro Tilt           │
                       └──────────────────────┘
 ```
 
-## Features
+## Возможности
 
-**Control:**
-- Dual joystick: left — throttle/steering, right — camera pan/tilt
-- 2 gears: 1st (max 50%) and 2nd (max 100%)
-- Laser pointer on/off
-- PiP window from turret camera on Control tab
+**Управление:**
+- Двойной джойстик: левый — газ/руль, правый — pan/tilt камеры
+- 2 передачи: 1я (макс 50%) и 2я (макс 100%)
+- Лазерный указатель вкл/выкл
+- PiP окно с камеры турели на вкладке Control
 
-**Tracking (Video tab):**
-- **Manual** — manual camera control with joystick
-- **Laser Dot** — HSV + bright‑spot detection of laser dot
-- **Object (YOLOv8)** — YOLOv8n TFLite, 80 COCO classes
-- **Gyro Tilt** — stabilization via phone IMU
+**Трекинг (вкладка Video):**
+- **Manual** — ручное управление камерой джойстиком
+- **Laser Dot** — HSV + bright-spot детекция лазерной точки
+- **Object (YOLOv8)** — YOLOv8n TFLite, 80 классов COCO
+- **Gyro Tilt** — стабилизация по IMU телефона
 
-**Video:**
-- PiP swap: switch main/PiP source (XIAO ↔ phone)
-- Overlay joysticks in Manual mode
-- YOLO/Laser analysis on XIAO stream when swapped
+**Видео:**
+- PiP swap: переключение основного/PiP источника (XIAO ↔ телефон)
+- Overlay джойстики в Manual режиме
+- YOLO/Laser анализ XIAO стрима при swap
 - Latency tracker (pipeline timing)
 
-**Odometry:**
+**Одометрия:**
 - Ackermann bicycle model (`headingRate = v × tan(steerAngle) / wheelBase`)
-- 2D map with auto‑scale, gradient track, pinch‑to‑zoom
-- Real speed from encoder RPM (m/s, km/h)
+- 2D карта с автомасштабом, градиентным треком, pinch-to-zoom
+- Реальная скорость из RPM энкодеров (м/с, км/ч)
 
-## Quick Start
+## Быстрый старт
 
-1. Flash rover and turret (see `firmware/README.md`)
-2. Turn on rover → turn on turret
-3. Connect phone to WiFi **RoverAP** (password: `rover12345`)
-4. Open app → Settings → Connect
+1. Прошить ровер и турель (см. `firmware/README.md`)
+2. Включить ровер → включить турель
+3. Подключить телефон к WiFi **RoverAP** (пароль: `rover12345`)
+4. Открыть приложение → Settings → Connect
 
-## Building the App
+## Сборка приложения
 
 ```bash
 cd RoverCtrl
 ./gradlew assembleDebug
 ```
 
-Requires Android Studio + Kotlin, minSdk 24, targetSdk 34.
+Требуется Android Studio + Kotlin, minSdk 24, targetSdk 34.
 
-Model `yolov8n.tflite` must be placed in `app/src/main/assets/`.
+Модель `yolov8n.tflite` должна лежать в `app/src/main/assets/`.
 
-## Project Structure
+## Структура проекта
 
 ```
 RoverCtrl/
@@ -111,15 +111,15 @@ RoverCtrl/
 │   ├── res/layout/        # fragment_control, fragment_video, fragment_cfg, ...
 │   └── assets/            # yolov8n.tflite
 ├── firmware/
-│   ├── rover_ap/          # Rover firmware (ESP32-S3)
-│   └── turret_client/     # Turret firmware (XIAO ESP32S3 Sense)
+│   ├── rover_ap/          # Прошивка ровера (ESP32-S3)
+│   └── turret_client/     # Прошивка турели (XIAO ESP32S3 Sense)
 └── README.md
 ```
 
 ## TODO
 
-- [ ] OTA firmware update over WiFi (ArduinoOTA / ESP HTTP OTA)
-- [ ] Raspberry Pi 5 integration (camera + AI HAT+)
-- [ ] Joystick sensitivity settings in Settings
-- [ ] Video / telemetry recording
-- [ ] Autopilot (waypoint navigation)
+- [ ] OTA прошивка по WiFi (ArduinoOTA / ESP HTTP OTA)
+- [ ] Интеграция Raspberry Pi 5 (камера + AI HAT+)
+- [ ] Настройка чувствительности джойстиков в Settings
+- [ ] Запись видео / телеметрии
+- [ ] Автопилот (waypoint навигация)

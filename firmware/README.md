@@ -7,7 +7,7 @@
 | Модуль | Директория | Плата | Версия | WiFi Mode |
 |--------|------------|-------|--------|-----------|
 | Ровер | `rover_ap/` | ESP32-S3 | v2.4 | **AP** (192.168.4.1) |
-| Турель | `turret_client/` | XIAO ESP32S3 Sense | v2.3 | Station (192.168.4.2) |
+| Турель | `turret_client/` | XIAO ESP32S3 Sense | v2.5 | Station (192.168.4.2) |
 
 ## Архитектура
 
@@ -41,8 +41,8 @@
 │ 192.168.4.2     │  │  • 4 режима        │
 │                  │  │    трекинга        │
 │ • Pan (позиц.)  │  │  • PiP swap        │
-│ • Tilt (CR+PID) │  │  • Одометрия       │
-│ • OV2640 QVGA   │  │  • Калибровка      │
+│ • Tilt (позиционный) │  │  • Одометрия       │
+│ • OV2640 HVGA   │  │  • Калибровка      │
 │ • MJPEG :81     │  │                    │
 │ • Watchdog 2с   │  │                    │
 └──────────────────┘  └──────────────────┘
@@ -107,8 +107,8 @@ Ready!
 
 **Турель:**
 ```
-=== Turret v2.3 CR virtual angle ===
-PAN=positional TILT=CR(neutral=90 Kp=1.2 deg/s=90)
+=== Turret v2.5 CR positional tilt ===
+PAN=positional TILT=CR positional(neutral=90 maxSpeed=50 up=60 dn=90)
 Camera OK
 Connected: 192.168.4.2
 Ready!
