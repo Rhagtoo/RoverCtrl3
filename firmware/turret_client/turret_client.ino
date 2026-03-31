@@ -20,8 +20,8 @@
 
 const char* AP_SSID="RoverAP"; const char* AP_PASS="rover12345";
 const IPAddress STATIC_IP(192,168,4,2),GATEWAY(192,168,4,1),SUBNET(255,255,255,0);
-#define SERVO_PAN 4
-#define SERVO_TILT 2
+#define SERVO_PAN 2
+#define SERVO_TILT 4
 #define PWDN_GPIO_NUM -1
 #define RESET_GPIO_NUM -1
 #define XCLK_GPIO_NUM 10
@@ -71,7 +71,7 @@ bool setupCamera() {
     c.pin_sccb_sda=SIOD_GPIO_NUM; c.pin_sccb_scl=SIOC_GPIO_NUM;
     c.pin_pwdn=PWDN_GPIO_NUM; c.pin_reset=RESET_GPIO_NUM;
     c.xclk_freq_hz=20000000; c.pixel_format=PIXFORMAT_JPEG;
-    c.frame_size=FRAMESIZE_VGA; c.jpeg_quality=8;
+    c.frame_size=FRAMESIZE_HVGA; c.jpeg_quality=8;
     c.fb_count=2; c.grab_mode=CAMERA_GRAB_LATEST;
     return esp_camera_init(&c) == ESP_OK;
 }
