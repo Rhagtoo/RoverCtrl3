@@ -130,18 +130,18 @@ class VideoFragment : Fragment() {
         tvCamLabel         = view.findViewById(R.id.tv_cam_label_video)
         btnLaserVideo      = view.findViewById(R.id.btn_laser_video)
 
-        // edge-to-edge: insets для верхней панели и правого джойстика (временно отключено из-за краша)
-        // val toolbarVideo = view.findViewById<View>(R.id.toolbar_video)
-        // ViewCompat.setOnApplyWindowInsetsListener(toolbarVideo) { v, insets ->
-        //     val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-        //     v.setPadding(v.paddingLeft, sb.top, v.paddingRight, v.paddingBottom)
-        //     insets
-        // }
-        // ViewCompat.setOnApplyWindowInsetsListener(joystickCam) { v, insets ->
-        //     val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-        //     v.setPadding(v.paddingLeft, v.paddingTop, sb.right, v.paddingBottom)
-        //     insets
-        // }
+        // edge-to-edge: insets для верхней панели и правого джойстика
+        val toolbarVideo = view.findViewById<View>(R.id.toolbar_video)
+        ViewCompat.setOnApplyWindowInsetsListener(toolbarVideo) { v, insets ->
+            val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(v.paddingLeft, sb.top, v.paddingRight, v.paddingBottom)
+            insets
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(joystickCam) { v, insets ->
+            val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(v.paddingLeft, v.paddingTop, sb.right, v.paddingBottom)
+            insets
+        }
 
         // Латенси всегда видна — начальное состояние
         tvLatency.text = "-- ms"
@@ -358,12 +358,19 @@ class VideoFragment : Fragment() {
     }
 
     private fun updateOverlayControlsVisibility(mode: TrackingMode) {
-        val v = if (mode == TrackingMode.MANUAL) View.VISIBLE else View.GONE
-        joystickDrive.visibility  = v
-        joystickCam.visibility    = v
-        tvDriveLabel.visibility   = v
-        tvCamLabel.visibility     = v
-        btnLaserVideo.visibility  = v
+        val showDrive = when (mode) {
+            TrackingMode.MANUAL, TrackingMode.LASER_DOT, TrackingMode.OBJECT_TRACK, TrackingMode.GYRO_TILT -> View.VISIBLE
+            else -> View.GONE
+        }
+        val showCam = when (mode) {
+            TrackingMode.MANUAL, TrackingMode.GYRO_TILT -> View.VISIBLE
+            else -> View.GONE
+        }
+        joystickDrive.visibility  = showDrive
+        joystickCam.visibility    = showCam
+        tvDriveLabel.visibility   = showDrive
+        tvCamLabel.visibility     = showCam
+        btnLaserVideo.visibility  = showDrive  // кнопка лазера видна когда виден джойстик движения
     }
 
     // ── CameraX ──────────────────────────────────────────────────────────
