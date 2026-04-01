@@ -21,7 +21,7 @@
         android:id="@+id/iv_xiao_main"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:scaleType="centerCrop"
+        android:scaleType="fitCenter"
         android:visibility="gone"
         android:contentDescription="XIAO camera fullscreen"
         app:layout_constraintTop_toTopOf="parent"
