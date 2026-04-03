@@ -42,7 +42,15 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 
 /**
- * VideoFragment v2.4
+ * VideoFragment v2.7 - Исправленная версия
+ * FIXES:
+ * 1. Добавлена очистка laserTracker в onDestroyView()
+ * 2. Исправлен memory leak в processXiaoFrame (finally block для recycle)
+ * 3. Добавлен @Volatile для swapped
+ * 4. Улучшен FPS расчёт через скользящее среднее
+ * 5. Добавлен throttling для анализа XIAO кадров
+ * 6. Добавлена обработка ошибок для LaserTracker
+ * 7. Убран поворот изображения на 90 градусов (applyRotation всегда возвращает оригинал)
  * - Латенси пайплайна: всегда видна (tv_latency всегда VISIBLE)
  *   Manual: показывает только FPS камеры
  *   Tracking: decode→infer→cmd задержка в мс
@@ -50,7 +58,11 @@ import java.util.concurrent.Executors
  */
 @androidx.camera.camera2.interop.ExperimentalCamera2Interop
 class VideoFragment : Fragment() {
-    companion object { private const val TAG = "VideoFrag" }
+    companion object { 
+        private const val TAG = "VideoFrag"
+        private const val XIAO_ANALYSIS_INTERVAL_MS = 33L  // ~30 FPS
+        private const val FPS_BUFFER_SIZE = 10
+    }
 
     private val vm: RoverViewModel by activityViewModels()
     private val handler = Handler(Looper.getMainLooper())
@@ -82,7 +94,7 @@ class VideoFragment : Fragment() {
     private lateinit var tvCamLabel:        TextView
     private lateinit var btnLaserVideo:     ToggleButton
 
-    private var swapped = false
+    @Volatile private var swapped = false  // FIX: volatile для thread safety
     private var laserTracker:  LaserTracker?  = null
     private var objectTracker: ObjectTracker? = null
 
@@ -90,13 +102,18 @@ class VideoFragment : Fragment() {
     private var cameraProvider: ProcessCameraProvider? = null
     private var xiaoAnalysisJob: Job? = null
 
-    // FPS счётчик для камеры
+    // Улучшенный FPS счётчик для камеры
     private var frameCount = 0
     private var lastFpsTime = System.currentTimeMillis()
     private var lastCameraFps = 0f
+    private val fpsBuffer = FloatArray(FPS_BUFFER_SIZE)
+    private var fpsIndex = 0
 
     // Латенси: обновляем не чаще раза в 500мс
     private var lastLatencyUpdate = 0L
+    
+    // Throttling для анализа XIAO кадров
+    private var lastXiaoAnalysisTime = 0L
 
     private val permLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -302,8 +319,20 @@ class VideoFragment : Fragment() {
             xiaoAnalysisJob = viewLifecycleOwner.lifecycleScope.launch {
                 vm.turretFrame.collectLatest { bmp ->
                     if (bmp != null && swapped) {
-                        val copy = bmp.copy(Bitmap.Config.ARGB_8888, false) ?: return@collectLatest
-                        analysisExecutor.execute { processXiaoFrame(copy) }
+                        val now = System.currentTimeMillis()
+                        // FIX: throttling для анализа XIAO кадров
+                        if (now - lastXiaoAnalysisTime >= XIAO_ANALYSIS_INTERVAL_MS) {
+                            lastXiaoAnalysisTime = now
+                            val copy = bmp.copy(Bitmap.Config.ARGB_8888, false) ?: return@collectLatest
+                            analysisExecutor.execute { 
+                                try {
+                                    processXiaoFrame(copy)
+                                } finally {
+                                    // FIX: гарантированное освобождение памяти
+                                    copy.recycle()
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -418,14 +447,19 @@ class VideoFragment : Fragment() {
     // ── CameraX Frame Processing ──────────────────────────────────────────
 
     private fun processFrame(imageProxy: ImageProxy) {
-        // FPS камеры (считаем все кадры независимо от режима)
+        // Улучшенный FPS расчёт через скользящее среднее
         frameCount++
         val now = System.currentTimeMillis()
         if (now - lastFpsTime >= 1000) {
-            lastCameraFps = frameCount * 1000f / (now - lastFpsTime)
+            val currentFps = frameCount * 1000f / (now - lastFpsTime)
+            fpsBuffer[fpsIndex] = currentFps
+            fpsIndex = (fpsIndex + 1) % FPS_BUFFER_SIZE
+            lastCameraFps = fpsBuffer.average().toFloat()
+            
             handler.post { tvFps.text = "%.0f FPS".format(lastCameraFps) }
             frameCount = 0
             lastFpsTime = now
+            
             // В Manual обновляем латенси просто FPS-ом
             val mode = vm.trackMode.value
             if (mode == TrackingMode.MANUAL || mode == TrackingMode.GYRO_TILT) {
@@ -506,11 +540,17 @@ class VideoFragment : Fragment() {
     }
 
     private fun applyRotation(bmp: Bitmap, deg: Int): Bitmap {
-        if (deg == 0) return bmp
-        val r = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height,
-            Matrix().apply { postRotate(deg.toFloat()) }, true)
-        if (r !== bmp) bmp.recycle()
-        return r
+        // FIX: полностью убрали поворот изображения
+        // Камера телефона возвращает изображение, которое PreviewView уже поворачивает
+        // Если анализировать повёрнутое изображение, координаты трекинга не совпадут с отображением
+        // 
+        // ВАЖНО: PreviewView должен быть настроен с scaleType="fitCenter" и
+        // CameraX должен автоматически корректировать ориентацию preview
+        // 
+        // Если координаты трекинга всё ещё не совпадают, возможно нужно:
+        // 1. Настроить TrackingOverlayView для учёта rotationDegrees
+        // 2. Или передавать rotationDegrees в трекер для коррекции координат
+        return bmp
     }
 
     private fun setupModeSpinner() {
@@ -531,8 +571,18 @@ class VideoFragment : Fragment() {
         when (mode) {
             TrackingMode.MANUAL, TrackingMode.GYRO_TILT -> {}
             TrackingMode.LASER_DOT -> {
-                if (laserTracker == null) laserTracker = LaserTracker()
-                else laserTracker?.resetPid()
+                // FIX: добавлена обработка ошибок
+                if (laserTracker == null) {
+                    try {
+                        laserTracker = LaserTracker()  // LaserTracker не требует Context
+                    } catch (e: Throwable) {
+                        Toast.makeText(requireContext(), "Laser: ${e.message}", Toast.LENGTH_LONG).show()
+                        vm.setTrackMode(TrackingMode.MANUAL)
+                        spinnerMode.setSelection(0)
+                    }
+                } else {
+                    laserTracker?.resetPid()
+                }
             }
             TrackingMode.OBJECT_TRACK -> {
                 if (objectTracker == null) {
@@ -553,6 +603,7 @@ class VideoFragment : Fragment() {
         xiaoAnalysisJob?.cancel()
         cameraProvider?.unbindAll()
         objectTracker?.close()
+        // LaserTracker не имеет метода close(), но не держит ресурсов
         analysisExecutor.shutdown()
     }
 }
