@@ -32,7 +32,7 @@ class RoverViewModel : ViewModel() {
 
         // Угол поворота кадра с камеры XIAO (градусы, по часовой стрелке).
         // Меняй если турель смонтирована иначе: 0 / 90 / 180 / 270
-        private const val TURRET_ROTATION_DEG = 0f  // FIX: убрали поворот XIAO кадра
+        private const val TURRET_ROTATION_DEG = 90f  // XIAO камера в portrait, поворачиваем на 90° для landscape
     }
 
     val sender   = CommandSender()
@@ -183,7 +183,7 @@ class RoverViewModel : ViewModel() {
             url = url,
             onFrame = { bmp ->
                 // Всегда создаём копию bitmap для thread safety
-                // Даже при TURRET_ROTATION_DEG = 0f создаём копию без поворота
+                // XIAO камера в portrait, поворачиваем на 90° для landscape ориентации
                 val frameToUse = if (TURRET_ROTATION_DEG == 0f) {
                     // Создаём копию без поворота
                     bmp.copy(bmp.config, true) ?: run {

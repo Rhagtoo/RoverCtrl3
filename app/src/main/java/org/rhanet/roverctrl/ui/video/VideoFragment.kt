@@ -340,6 +340,10 @@ class VideoFragment : Fragment() {
     }
 
     private fun processXiaoFrame(bitmap: Bitmap) {
+        // Запоминаем размеры ДО обработки трекером
+        val bmpW = bitmap.width
+        val bmpH = bitmap.height
+        
         val ft = latency.beginFrame()
         latency.mark(ft, LatencyTracker.Stage.DECODED)
         latency.mark(ft, LatencyTracker.Stage.INFERENCE_START)
@@ -352,8 +356,18 @@ class VideoFragment : Fragment() {
                     val label = r.detection?.label ?: ""
                     vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post { trackingOverlay().detection = r.detection }
-                } else handler.post { trackingOverlay().detection = null }
+                    handler.post {
+                        val ov = trackingOverlay()
+                        ov.sourceImageWidth = bmpW
+                        ov.sourceImageHeight = bmpH
+                        ov.detection = r.detection
+                    }
+                } else handler.post {
+                    val ov = trackingOverlay()
+                    ov.sourceImageWidth = bmpW
+                    ov.sourceImageHeight = bmpH
+                    ov.detection = null
+                }
             }
             TrackingMode.OBJECT_TRACK -> {
                 val r = objectTracker?.process(bitmap)
@@ -363,8 +377,18 @@ class VideoFragment : Fragment() {
                     val label = r.detection?.label ?: ""
                     vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post { trackingOverlay().detection = r.detection }
-                } else handler.post { trackingOverlay().detection = null }
+                    handler.post {
+                        val ov = trackingOverlay()
+                        ov.sourceImageWidth = bmpW
+                        ov.sourceImageHeight = bmpH
+                        ov.detection = r.detection
+                    }
+                } else handler.post {
+                    val ov = trackingOverlay()
+                    ov.sourceImageWidth = bmpW
+                    ov.sourceImageHeight = bmpH
+                    ov.detection = null
+                }
             }
             else -> {}
         }
@@ -481,6 +505,10 @@ class VideoFragment : Fragment() {
         latency.mark(ft, LatencyTracker.Stage.DECODED)
         latency.mark(ft, LatencyTracker.Stage.INFERENCE_START)
 
+        // Запоминаем размеры bitmap
+        val bmpW = bitmap.width
+        val bmpH = bitmap.height
+        
         when (mode) {
             TrackingMode.LASER_DOT -> {
                 val r = laserTracker?.process(bitmap)
@@ -490,8 +518,18 @@ class VideoFragment : Fragment() {
                     val label = r.detection?.label ?: ""
                     vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post { trackingOverlay().detection = r.detection }
-                } else handler.post { trackingOverlay().detection = null }
+                    handler.post {
+                        val ov = trackingOverlay()
+                        ov.sourceImageWidth = bmpW
+                        ov.sourceImageHeight = bmpH
+                        ov.detection = r.detection
+                    }
+                } else handler.post {
+                    val ov = trackingOverlay()
+                    ov.sourceImageWidth = bmpW
+                    ov.sourceImageHeight = bmpH
+                    ov.detection = null
+                }
             }
             TrackingMode.OBJECT_TRACK -> {
                 val r = objectTracker?.process(bitmap)
@@ -501,8 +539,18 @@ class VideoFragment : Fragment() {
                     val label = r.detection?.label ?: ""
                     vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post { trackingOverlay().detection = r.detection }
-                } else handler.post { trackingOverlay().detection = null }
+                    handler.post {
+                        val ov = trackingOverlay()
+                        ov.sourceImageWidth = bmpW
+                        ov.sourceImageHeight = bmpH
+                        ov.detection = r.detection
+                    }
+                } else handler.post {
+                    val ov = trackingOverlay()
+                    ov.sourceImageWidth = bmpW
+                    ov.sourceImageHeight = bmpH
+                    ov.detection = null
+                }
             }
             else -> {}
         }
