@@ -182,14 +182,28 @@ class RoverViewModel : ViewModel() {
         mjpegDecoder = MjpegDecoder(
             url = url,
             onFrame = { bmp ->
-                // FIX: убрали поворот XIAO кадра (TURRET_ROTATION_DEG = 0)
-                val rotated = Bitmap.createBitmap(
-                    bmp, 0, 0, bmp.width, bmp.height, turretRotMatrix, true)
-                bmp.recycle()
+                // Всегда создаём копию bitmap для thread safety
+                // Даже при TURRET_ROTATION_DEG = 0f создаём копию без поворота
+                val frameToUse = if (TURRET_ROTATION_DEG == 0f) {
+                    // Создаём копию без поворота
+                    bmp.copy(bmp.config, true) ?: run {
+                        Log.w(TAG, "Failed to copy bitmap, using original")
+                        bmp
+                    }
+                } else {
+                    // Создаём копию с поворотом
+                    Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, turretRotMatrix, true)
+                }
+                
+                // Освобождаем оригинальный bitmap после создания копии
+                // Но только если создали новую bitmap (не используем оригинал как fallback)
+                if (frameToUse !== bmp) {
+                    bmp.recycle()
+                }
 
                 mainHandler.post {
                     _turretFrame.value?.recycle()
-                    _turretFrame.value = rotated
+                    _turretFrame.value = frameToUse
                     _turretConnected.value = true
                 }
             },
