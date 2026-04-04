@@ -323,8 +323,18 @@ class VideoFragment : Fragment() {
                     val label = r.detection?.label ?: ""
                     vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post { trackingOverlay().detection = r.detection }
-                } else handler.post { trackingOverlay().detection = null }
+                    handler.post {
+                        val ov = trackingOverlay()
+                        ov.sourceImageWidth = bitmap.width
+                        ov.sourceImageHeight = bitmap.height
+                        ov.detection = r.detection
+                    }
+                } else handler.post {
+                    val ov = trackingOverlay()
+                    ov.sourceImageWidth = bitmap.width
+                    ov.sourceImageHeight = bitmap.height
+                    ov.detection = null
+                }
             }
             TrackingMode.OBJECT_TRACK -> {
                 val r = objectTracker?.process(bitmap)
@@ -334,8 +344,18 @@ class VideoFragment : Fragment() {
                     val label = r.detection?.label ?: ""
                     vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post { trackingOverlay().detection = r.detection }
-                } else handler.post { trackingOverlay().detection = null }
+                    handler.post {
+                        val ov = trackingOverlay()
+                        ov.sourceImageWidth = bitmap.width
+                        ov.sourceImageHeight = bitmap.height
+                        ov.detection = r.detection
+                    }
+                } else handler.post {
+                    val ov = trackingOverlay()
+                    ov.sourceImageWidth = bitmap.width
+                    ov.sourceImageHeight = bitmap.height
+                    ov.detection = null
+                }
             }
             else -> {}
         }
@@ -456,8 +476,18 @@ class VideoFragment : Fragment() {
                     val label = r.detection?.label ?: ""
                     vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post { trackingOverlay().detection = r.detection }
-                } else handler.post { trackingOverlay().detection = null }
+                    handler.post {
+                        val ov = trackingOverlay()
+                        ov.sourceImageWidth = bitmap.width
+                        ov.sourceImageHeight = bitmap.height
+                        ov.detection = r.detection
+                    }
+                } else handler.post {
+                    val ov = trackingOverlay()
+                    ov.sourceImageWidth = bitmap.width
+                    ov.sourceImageHeight = bitmap.height
+                    ov.detection = null
+                }
             }
             TrackingMode.OBJECT_TRACK -> {
                 val r = objectTracker?.process(bitmap)
@@ -467,8 +497,18 @@ class VideoFragment : Fragment() {
                     val label = r.detection?.label ?: ""
                     vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post { trackingOverlay().detection = r.detection }
-                } else handler.post { trackingOverlay().detection = null }
+                    handler.post {
+                        val ov = trackingOverlay()
+                        ov.sourceImageWidth = bitmap.width
+                        ov.sourceImageHeight = bitmap.height
+                        ov.detection = r.detection
+                    }
+                } else handler.post {
+                    val ov = trackingOverlay()
+                    ov.sourceImageWidth = bitmap.width
+                    ov.sourceImageHeight = bitmap.height
+                    ov.detection = null
+                }
             }
             else -> {}
         }
