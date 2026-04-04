@@ -29,6 +29,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlin.math.max
 import org.rhanet.roverctrl.R
 import org.rhanet.roverctrl.data.TrackingMode
 import org.rhanet.roverctrl.tracking.*
@@ -119,7 +120,7 @@ class VideoFragment : Fragment() {
                 cy = SMOOTHING_ALPHA * newDetection.cy + (1 - SMOOTHING_ALPHA) * lastDetection.cy,
                 w = SMOOTHING_ALPHA * newDetection.w + (1 - SMOOTHING_ALPHA) * lastDetection.w,
                 h = SMOOTHING_ALPHA * newDetection.h + (1 - SMOOTHING_ALPHA) * lastDetection.h,
-                confidence = maxOf(newDetection.confidence, lastDetection.confidence * 0.95f),
+                confidence = if (newDetection.confidence > lastDetection.confidence * 0.95f) newDetection.confidence else lastDetection.confidence * 0.95f,
                 label = newDetection.label
             )
         } else {
@@ -470,7 +471,7 @@ class VideoFragment : Fragment() {
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setTargetResolution(Size(320, 240))
             Camera2Interop.Extender(ab).setCaptureRequestOption(
-                android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(10, 15))  // FIX: 10-15 FPS для CV
+                android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(30, 60))  // Безопасный диапазон для CV
             val analysis = ab.build()
             analysis.setAnalyzer(analysisExecutor, ::processFrame)
 
@@ -481,7 +482,7 @@ class VideoFragment : Fragment() {
                     Camera2CameraControl.from(cam.cameraControl).addCaptureRequestOptions(
                         CaptureRequestOptions.Builder().setCaptureRequestOption(
                             android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-                            Range(10, 15)).build())  // FIX: 10-15 FPS для CV
+                            Range(30, 60)).build())  // Безопасный диапазон для CV
                 } catch (_: Throwable) {}
             } catch (e: Exception) {
                 Log.e(TAG, "Camera fallback", e)
@@ -491,7 +492,7 @@ class VideoFragment : Fragment() {
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .setTargetResolution(Size(320, 240)).build()
                 Camera2Interop.Extender(fa).setCaptureRequestOption(
-                    android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(10, 15))  // FIX: 10-15 FPS
+                    android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(30, 60))  // Безопасный диапазон для CV
                 fa.setAnalyzer(analysisExecutor, ::processFrame)
                 prov.bindToLifecycle(viewLifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, fp, fa)
             }
