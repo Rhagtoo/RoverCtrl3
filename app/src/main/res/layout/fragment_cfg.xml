@@ -29,7 +29,6 @@
             android:textSize="12sp"
             android:layout_marginBottom="12dp" />
 
-        <!-- Статус -->
         <TextView
             android:id="@+id/tv_connection_status"
             android:layout_width="wrap_content"
@@ -50,61 +49,31 @@
             android:textStyle="bold"
             android:layout_marginBottom="8dp" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Rover IP"
-            android:textColor="#AAAAAA"
-            android:textSize="12sp" />
-        <EditText
-            android:id="@+id/et_rover_ip"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:inputType="text"
-            android:textColor="#FFFFFF"
-            android:background="#333333"
-            android:padding="8dp"
-            android:hint="192.168.4.1"
-            android:textColorHint="#666666"
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Rover IP" android:textColor="#AAAAAA" android:textSize="12sp" />
+        <EditText android:id="@+id/et_rover_ip"
+            android:layout_width="match_parent" android:layout_height="44dp"
+            android:inputType="text" android:textColor="#FFFFFF" android:background="#333333"
+            android:padding="8dp" android:hint="192.168.4.1" android:textColorHint="#666666"
             android:layout_marginBottom="8dp" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Command Port"
-            android:textColor="#AAAAAA"
-            android:textSize="12sp" />
-        <EditText
-            android:id="@+id/et_cmd_port"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:inputType="number"
-            android:textColor="#FFFFFF"
-            android:background="#333333"
-            android:padding="8dp"
-            android:hint="4210"
-            android:textColorHint="#666666"
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Command Port" android:textColor="#AAAAAA" android:textSize="12sp" />
+        <EditText android:id="@+id/et_cmd_port"
+            android:layout_width="match_parent" android:layout_height="44dp"
+            android:inputType="number" android:textColor="#FFFFFF" android:background="#333333"
+            android:padding="8dp" android:hint="4210" android:textColorHint="#666666"
             android:layout_marginBottom="8dp" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Telemetry Port"
-            android:textColor="#AAAAAA"
-            android:textSize="12sp" />
-        <EditText
-            android:id="@+id/et_tel_port"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:inputType="number"
-            android:textColor="#FFFFFF"
-            android:background="#333333"
-            android:padding="8dp"
-            android:hint="4211"
-            android:textColorHint="#666666"
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Telemetry Port" android:textColor="#AAAAAA" android:textSize="12sp" />
+        <EditText android:id="@+id/et_tel_port"
+            android:layout_width="match_parent" android:layout_height="44dp"
+            android:inputType="number" android:textColor="#FFFFFF" android:background="#333333"
+            android:padding="8dp" android:hint="4211" android:textColorHint="#666666"
             android:layout_marginBottom="16dp" />
 
-        <!-- ── Xiao (Pan/Tilt серво + камера) ─────── -->
+        <!-- ── Xiao ─────── -->
 
         <TextView
             android:layout_width="wrap_content"
@@ -115,58 +84,28 @@
             android:textStyle="bold"
             android:layout_marginBottom="8dp" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Xiao IP"
-            android:textColor="#AAAAAA"
-            android:textSize="12sp" />
-        <EditText
-            android:id="@+id/et_xiao_ip"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:inputType="text"
-            android:textColor="#FFFFFF"
-            android:background="#333333"
-            android:padding="8dp"
-            android:hint="192.168.4.2"
-            android:textColorHint="#666666"
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Xiao IP" android:textColor="#AAAAAA" android:textSize="12sp" />
+        <EditText android:id="@+id/et_xiao_ip"
+            android:layout_width="match_parent" android:layout_height="44dp"
+            android:inputType="text" android:textColor="#FFFFFF" android:background="#333333"
+            android:padding="8dp" android:hint="192.168.4.2" android:textColorHint="#666666"
             android:layout_marginBottom="8dp" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Xiao Servo Port (UDP)"
-            android:textColor="#AAAAAA"
-            android:textSize="12sp" />
-        <EditText
-            android:id="@+id/et_xiao_port"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:inputType="number"
-            android:textColor="#FFFFFF"
-            android:background="#333333"
-            android:padding="8dp"
-            android:hint="4210"
-            android:textColorHint="#666666"
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Xiao Servo Port (UDP)" android:textColor="#AAAAAA" android:textSize="12sp" />
+        <EditText android:id="@+id/et_xiao_port"
+            android:layout_width="match_parent" android:layout_height="44dp"
+            android:inputType="number" android:textColor="#FFFFFF" android:background="#333333"
+            android:padding="8dp" android:hint="4210" android:textColorHint="#666666"
             android:layout_marginBottom="8dp" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Xiao Camera Stream Port (HTTP MJPEG)"
-            android:textColor="#AAAAAA"
-            android:textSize="12sp" />
-        <EditText
-            android:id="@+id/et_xiao_stream_port"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:inputType="number"
-            android:textColor="#FFFFFF"
-            android:background="#333333"
-            android:padding="8dp"
-            android:hint="81"
-            android:textColorHint="#666666"
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Xiao Camera Stream Port (HTTP MJPEG)" android:textColor="#AAAAAA" android:textSize="12sp" />
+        <EditText android:id="@+id/et_xiao_stream_port"
+            android:layout_width="match_parent" android:layout_height="44dp"
+            android:inputType="number" android:textColor="#FFFFFF" android:background="#333333"
+            android:padding="8dp" android:hint="81" android:textColorHint="#666666"
             android:layout_marginBottom="16dp" />
 
         <!-- Buttons -->
@@ -176,31 +115,19 @@
             android:orientation="horizontal"
             android:layout_marginBottom="8dp">
 
-            <Button
-                android:id="@+id/btn_connect"
-                android:layout_width="0dp"
-                android:layout_height="52dp"
-                android:layout_weight="2"
-                android:text="Connect"
-                android:textSize="16sp"
-                android:layout_marginEnd="8dp" />
+            <Button android:id="@+id/btn_connect"
+                android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="2"
+                android:text="Connect" android:textSize="16sp" android:layout_marginEnd="8dp" />
 
-            <Button
-                android:id="@+id/btn_reset"
-                android:layout_width="0dp"
-                android:layout_height="52dp"
-                android:layout_weight="1"
-                android:text="Reset"
-                android:textSize="14sp"
-                android:backgroundTint="#555555" />
-
+            <Button android:id="@+id/btn_reset"
+                android:layout_width="0dp" android:layout_height="52dp" android:layout_weight="1"
+                android:text="Reset" android:textSize="14sp" android:backgroundTint="#555555" />
         </LinearLayout>
 
-        <!-- Info -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="v2.5 AP Mode — Rover creates WiFi hotspot"
+            android:text="v2.6 AP Mode — Rover creates WiFi hotspot"
             android:textColor="#666666"
             android:textSize="11sp"
             android:layout_marginTop="8dp" />
@@ -209,12 +136,8 @@
         <!-- ── TILT CALIBRATION ──────────────────────────────────────────── -->
         <!-- ═══════════════════════════════════════════════════════════════ -->
 
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#333333"
-            android:layout_marginTop="20dp"
-            android:layout_marginBottom="16dp" />
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="#333333" android:layout_marginTop="20dp" android:layout_marginBottom="16dp" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -248,7 +171,7 @@
             android:padding="10dp"
             android:layout_marginBottom="10dp" />
 
-        <!-- +/- buttons row -->
+        <!-- ±1°/±5° buttons row -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -256,56 +179,160 @@
             android:gravity="center"
             android:layout_marginBottom="8dp">
 
-            <Button
-                android:id="@+id/btn_tilt_m5"
-                android:layout_width="56dp"
-                android:layout_height="44dp"
-                android:text="-5°"
-                android:textSize="13sp"
-                android:backgroundTint="#555555"
-                android:layout_marginEnd="4dp" />
-
-            <Button
-                android:id="@+id/btn_tilt_m1"
-                android:layout_width="56dp"
-                android:layout_height="44dp"
-                android:text="-1°"
-                android:textSize="13sp"
-                android:backgroundTint="#555555"
-                android:layout_marginEnd="8dp" />
-
-            <Button
-                android:id="@+id/btn_tilt_reset"
-                android:layout_width="72dp"
-                android:layout_height="44dp"
-                android:text="90°"
-                android:textSize="13sp"
+            <Button android:id="@+id/btn_tilt_m5"
+                android:layout_width="56dp" android:layout_height="44dp"
+                android:text="-5°" android:textSize="13sp"
+                android:backgroundTint="#555555" android:layout_marginEnd="4dp" />
+            <Button android:id="@+id/btn_tilt_m1"
+                android:layout_width="56dp" android:layout_height="44dp"
+                android:text="-1°" android:textSize="13sp"
+                android:backgroundTint="#555555" android:layout_marginEnd="8dp" />
+            <Button android:id="@+id/btn_tilt_reset"
+                android:layout_width="72dp" android:layout_height="44dp"
+                android:text="90°" android:textSize="13sp"
                 android:backgroundTint="#7C4DFF" />
-
-            <Button
-                android:id="@+id/btn_tilt_p1"
-                android:layout_width="56dp"
-                android:layout_height="44dp"
-                android:text="+1°"
-                android:textSize="13sp"
-                android:backgroundTint="#555555"
-                android:layout_marginStart="8dp" />
-
-            <Button
-                android:id="@+id/btn_tilt_p5"
-                android:layout_width="56dp"
-                android:layout_height="44dp"
-                android:text="+5°"
-                android:textSize="13sp"
-                android:backgroundTint="#555555"
-                android:layout_marginStart="4dp" />
-
+            <Button android:id="@+id/btn_tilt_p1"
+                android:layout_width="56dp" android:layout_height="44dp"
+                android:text="+1°" android:textSize="13sp"
+                android:backgroundTint="#555555" android:layout_marginStart="8dp" />
+            <Button android:id="@+id/btn_tilt_p5"
+                android:layout_width="56dp" android:layout_height="44dp"
+                android:text="+5°" android:textSize="13sp"
+                android:backgroundTint="#555555" android:layout_marginStart="4dp" />
         </LinearLayout>
+
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- ── TILT PARAMETERS (runtime tunable) ────────────────────────── -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="#333333" android:layout_marginTop="12dp" android:layout_marginBottom="12dp" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Adjust if camera position doesn't match virtual angle.\nButtons send VCAL command to directly set virtual angle."
+            android:text="TILT PARAMETERS"
+            android:textColor="#E040FB"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Adjust CR servo model. Changes apply instantly. Save to persist."
+            android:textColor="#888888"
+            android:textSize="10sp"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Neutral PWM -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="2dp">
+            <TextView android:layout_width="100dp" android:layout_height="wrap_content"
+                android:text="Neutral PWM" android:textColor="#AAAAAA" android:textSize="12sp" />
+            <TextView android:id="@+id/tv_tp_neutral_val" android:layout_width="40dp"
+                android:layout_height="wrap_content" android:text="90" android:textColor="#FFFFFF"
+                android:textSize="12sp" android:gravity="end" />
+        </LinearLayout>
+        <SeekBar android:id="@+id/sb_tp_neutral"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:min="70" android:max="110" android:progress="90"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Max Speed -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="2dp">
+            <TextView android:layout_width="100dp" android:layout_height="wrap_content"
+                android:text="Max Speed" android:textColor="#AAAAAA" android:textSize="12sp" />
+            <TextView android:id="@+id/tv_tp_speed_val" android:layout_width="40dp"
+                android:layout_height="wrap_content" android:text="60" android:textColor="#FFFFFF"
+                android:textSize="12sp" android:gravity="end" />
+        </LinearLayout>
+        <SeekBar android:id="@+id/sb_tp_speed"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:min="10" android:max="90" android:progress="60"
+            android:layout_marginBottom="8dp" />
+
+        <!-- DPS Camera Up -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="2dp">
+            <TextView android:layout_width="100dp" android:layout_height="wrap_content"
+                android:text="°/s Cam ↑" android:textColor="#AAAAAA" android:textSize="12sp" />
+            <TextView android:id="@+id/tv_tp_dps_up_val" android:layout_width="40dp"
+                android:layout_height="wrap_content" android:text="70" android:textColor="#FFFFFF"
+                android:textSize="12sp" android:gravity="end" />
+        </LinearLayout>
+        <SeekBar android:id="@+id/sb_tp_dps_up"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:min="10" android:max="200" android:progress="70"
+            android:layout_marginBottom="8dp" />
+
+        <!-- DPS Camera Down -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="2dp">
+            <TextView android:layout_width="100dp" android:layout_height="wrap_content"
+                android:text="°/s Cam ↓" android:textColor="#AAAAAA" android:textSize="12sp" />
+            <TextView android:id="@+id/tv_tp_dps_dn_val" android:layout_width="40dp"
+                android:layout_height="wrap_content" android:text="90" android:textColor="#FFFFFF"
+                android:textSize="12sp" android:gravity="end" />
+        </LinearLayout>
+        <SeekBar android:id="@+id/sb_tp_dps_dn"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:min="10" android:max="200" android:progress="90"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Deadband -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="2dp">
+            <TextView android:layout_width="100dp" android:layout_height="wrap_content"
+                android:text="Deadband °" android:textColor="#AAAAAA" android:textSize="12sp" />
+            <TextView android:id="@+id/tv_tp_deadband_val" android:layout_width="40dp"
+                android:layout_height="wrap_content" android:text="5" android:textColor="#FFFFFF"
+                android:textSize="12sp" android:gravity="end" />
+        </LinearLayout>
+        <SeekBar android:id="@+id/sb_tp_deadband"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:min="1" android:max="20" android:progress="5"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Test + Save buttons -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="8dp">
+
+            <Button android:id="@+id/btn_tcal_up"
+                android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1"
+                android:text="Test ↑ 2s" android:textSize="12sp"
+                android:backgroundTint="#1565C0" android:layout_marginEnd="4dp" />
+
+            <Button android:id="@+id/btn_tcal_dn"
+                android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1"
+                android:text="Test ↓ 2s" android:textSize="12sp"
+                android:backgroundTint="#1565C0" android:layout_marginEnd="4dp" />
+
+            <Button android:id="@+id/btn_tp_save"
+                android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1"
+                android:text="Save ESP" android:textSize="12sp"
+                android:backgroundTint="#00695C" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tv_tcal_result"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#80CBC4"
+            android:textSize="11sp"
+            android:fontFamily="monospace"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Test moves tilt 2s in one direction. Compare virtual Δ with physical movement.\nIf drift: adjust °/s until virtual matches real."
             android:textColor="#666666"
             android:textSize="10sp"
             android:layout_marginBottom="4dp" />
@@ -314,12 +341,8 @@
         <!-- ── OTA FIRMWARE UPDATE ──────────────────────────────────────── -->
         <!-- ═══════════════════════════════════════════════════════════════ -->
 
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#333333"
-            android:layout_marginTop="20dp"
-            android:layout_marginBottom="16dp" />
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="#333333" android:layout_marginTop="20dp" android:layout_marginBottom="16dp" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -330,110 +353,56 @@
             android:textStyle="bold"
             android:layout_marginBottom="8dp" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Target device"
-            android:textColor="#AAAAAA"
-            android:textSize="12sp"
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="Target device" android:textColor="#AAAAAA" android:textSize="12sp"
             android:layout_marginBottom="4dp" />
 
-        <RadioGroup
-            android:id="@+id/rg_ota_target"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginBottom="12dp">
-
-            <RadioButton
-                android:id="@+id/rb_ota_rover"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Rover (192.168.4.1)"
-                android:textColor="#FFFFFF"
-                android:textSize="12sp"
+        <RadioGroup android:id="@+id/rg_ota_target"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="12dp">
+            <RadioButton android:id="@+id/rb_ota_rover"
+                android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:text="Rover (192.168.4.1)" android:textColor="#FFFFFF" android:textSize="12sp"
                 android:checked="true" />
-
-            <RadioButton
-                android:id="@+id/rb_ota_turret"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Turret (192.168.4.2)"
-                android:textColor="#FFFFFF"
-                android:textSize="12sp" />
-
+            <RadioButton android:id="@+id/rb_ota_turret"
+                android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:text="Turret (192.168.4.2)" android:textColor="#FFFFFF" android:textSize="12sp" />
         </RadioGroup>
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginBottom="8dp">
-
-            <Button
-                android:id="@+id/btn_select_bin"
-                android:layout_width="0dp"
-                android:layout_height="44dp"
-                android:layout_weight="1"
-                android:text="Select .bin"
-                android:textSize="13sp"
-                android:backgroundTint="#444444"
-                android:layout_marginEnd="8dp" />
-
-            <TextView
-                android:id="@+id/tv_ota_filename"
-                android:layout_width="0dp"
-                android:layout_height="44dp"
-                android:layout_weight="2"
-                android:text="No file selected"
-                android:textColor="#888888"
-                android:textSize="12sp"
-                android:gravity="center_vertical"
-                android:ellipsize="start"
-                android:singleLine="true" />
-
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:layout_marginBottom="8dp">
+            <Button android:id="@+id/btn_select_bin"
+                android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1"
+                android:text="Select .bin" android:textSize="13sp"
+                android:backgroundTint="#444444" android:layout_marginEnd="8dp" />
+            <TextView android:id="@+id/tv_ota_filename"
+                android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="2"
+                android:text="No file selected" android:textColor="#888888" android:textSize="12sp"
+                android:gravity="center_vertical" android:ellipsize="start" android:singleLine="true" />
         </LinearLayout>
 
-        <ProgressBar
-            android:id="@+id/pb_ota"
+        <ProgressBar android:id="@+id/pb_ota"
             style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="8dp"
-            android:max="100"
-            android:progress="0"
-            android:layout_marginBottom="4dp"
+            android:layout_width="match_parent" android:layout_height="8dp"
+            android:max="100" android:progress="0" android:layout_marginBottom="4dp"
             android:visibility="invisible" />
 
-        <TextView
-            android:id="@+id/tv_ota_status"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text=""
-            android:textColor="#AAAAAA"
-            android:textSize="12sp"
+        <TextView android:id="@+id/tv_ota_status"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="" android:textColor="#AAAAAA" android:textSize="12sp"
             android:layout_marginBottom="8dp" />
 
-        <Button
-            android:id="@+id/btn_ota_upload"
-            android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:text="Flash Firmware"
-            android:textSize="15sp"
-            android:enabled="false"
-            android:backgroundTint="#BF360C" />
+        <Button android:id="@+id/btn_ota_upload"
+            android:layout_width="match_parent" android:layout_height="52dp"
+            android:text="Flash Firmware" android:textSize="15sp"
+            android:enabled="false" android:backgroundTint="#BF360C" />
 
         <!-- ═══════════════════════════════════════════════════════════════ -->
         <!-- ── JOYSTICK SENSITIVITY ──────────────────────────────────────── -->
         <!-- ═══════════════════════════════════════════════════════════════ -->
 
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#333333"
-            android:layout_marginTop="20dp"
-            android:layout_marginBottom="16dp" />
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="#333333" android:layout_marginTop="20dp" android:layout_marginBottom="16dp" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -445,124 +414,56 @@
             android:layout_marginBottom="12dp" />
 
         <!-- Drive Speed -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="4dp">
-            <TextView
-                android:layout_width="110dp"
-                android:layout_height="wrap_content"
-                android:text="Drive Speed"
-                android:textColor="#AAAAAA"
-                android:textSize="12sp" />
-            <TextView
-                android:id="@+id/tv_drive_speed_val"
-                android:layout_width="40dp"
-                android:layout_height="wrap_content"
-                android:text="1.0x"
-                android:textColor="#FFFFFF"
-                android:textSize="12sp"
-                android:gravity="end" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="4dp">
+            <TextView android:layout_width="110dp" android:layout_height="wrap_content"
+                android:text="Drive Speed" android:textColor="#AAAAAA" android:textSize="12sp" />
+            <TextView android:id="@+id/tv_drive_speed_val" android:layout_width="40dp"
+                android:layout_height="wrap_content" android:text="1.0x" android:textColor="#FFFFFF"
+                android:textSize="12sp" android:gravity="end" />
         </LinearLayout>
-        <SeekBar
-            android:id="@+id/sb_drive_speed"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="19"
-            android:progress="9"
-            android:layout_marginBottom="12dp" />
+        <SeekBar android:id="@+id/sb_drive_speed"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:max="19" android:progress="9" android:layout_marginBottom="12dp" />
 
         <!-- Drive Steer -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="4dp">
-            <TextView
-                android:layout_width="110dp"
-                android:layout_height="wrap_content"
-                android:text="Drive Steer"
-                android:textColor="#AAAAAA"
-                android:textSize="12sp" />
-            <TextView
-                android:id="@+id/tv_drive_steer_val"
-                android:layout_width="40dp"
-                android:layout_height="wrap_content"
-                android:text="1.0x"
-                android:textColor="#FFFFFF"
-                android:textSize="12sp"
-                android:gravity="end" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="4dp">
+            <TextView android:layout_width="110dp" android:layout_height="wrap_content"
+                android:text="Drive Steer" android:textColor="#AAAAAA" android:textSize="12sp" />
+            <TextView android:id="@+id/tv_drive_steer_val" android:layout_width="40dp"
+                android:layout_height="wrap_content" android:text="1.0x" android:textColor="#FFFFFF"
+                android:textSize="12sp" android:gravity="end" />
         </LinearLayout>
-        <SeekBar
-            android:id="@+id/sb_drive_steer"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="19"
-            android:progress="9"
-            android:layout_marginBottom="12dp" />
+        <SeekBar android:id="@+id/sb_drive_steer"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:max="19" android:progress="9" android:layout_marginBottom="12dp" />
 
         <!-- Cam Pan -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="4dp">
-            <TextView
-                android:layout_width="110dp"
-                android:layout_height="wrap_content"
-                android:text="Camera Pan"
-                android:textColor="#AAAAAA"
-                android:textSize="12sp" />
-            <TextView
-                android:id="@+id/tv_cam_pan_val"
-                android:layout_width="40dp"
-                android:layout_height="wrap_content"
-                android:text="1.0x"
-                android:textColor="#FFFFFF"
-                android:textSize="12sp"
-                android:gravity="end" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="4dp">
+            <TextView android:layout_width="110dp" android:layout_height="wrap_content"
+                android:text="Camera Pan" android:textColor="#AAAAAA" android:textSize="12sp" />
+            <TextView android:id="@+id/tv_cam_pan_val" android:layout_width="40dp"
+                android:layout_height="wrap_content" android:text="1.0x" android:textColor="#FFFFFF"
+                android:textSize="12sp" android:gravity="end" />
         </LinearLayout>
-        <SeekBar
-            android:id="@+id/sb_cam_pan"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="19"
-            android:progress="9"
-            android:layout_marginBottom="12dp" />
+        <SeekBar android:id="@+id/sb_cam_pan"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:max="19" android:progress="9" android:layout_marginBottom="12dp" />
 
         <!-- Cam Tilt -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="4dp">
-            <TextView
-                android:layout_width="110dp"
-                android:layout_height="wrap_content"
-                android:text="Camera Tilt"
-                android:textColor="#AAAAAA"
-                android:textSize="12sp" />
-            <TextView
-                android:id="@+id/tv_cam_tilt_val"
-                android:layout_width="40dp"
-                android:layout_height="wrap_content"
-                android:text="1.0x"
-                android:textColor="#FFFFFF"
-                android:textSize="12sp"
-                android:gravity="end" />
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="4dp">
+            <TextView android:layout_width="110dp" android:layout_height="wrap_content"
+                android:text="Camera Tilt" android:textColor="#AAAAAA" android:textSize="12sp" />
+            <TextView android:id="@+id/tv_cam_tilt_val" android:layout_width="40dp"
+                android:layout_height="wrap_content" android:text="1.0x" android:textColor="#FFFFFF"
+                android:textSize="12sp" android:gravity="end" />
         </LinearLayout>
-        <SeekBar
-            android:id="@+id/sb_cam_tilt"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:max="19"
-            android:progress="9"
-            android:layout_marginBottom="8dp" />
+        <SeekBar android:id="@+id/sb_cam_tilt"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:max="19" android:progress="9" android:layout_marginBottom="8dp" />
 
     </LinearLayout>
 </ScrollView>

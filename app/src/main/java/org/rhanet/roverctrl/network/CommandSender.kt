@@ -59,10 +59,7 @@ class CommandSender {
     }
 
     fun sendRover(spd: Int, str: Int, fwd: Int, laser: Boolean, gear: Int = 2) {
-        var laserInt = 0
-        if (laser) {
-            laserInt = 1
-        }
+        val laserInt = if (laser) 1 else 0
         val msg = "SPD:$spd;STR:$str;FWD:$fwd;LASER:$laserInt;GEAR:$gear\n"
         scope.launch {
             val addr = roverAddr
@@ -84,7 +81,7 @@ class CommandSender {
         }
     }
 
-    /** Отправить VCAL команду — прямая установка виртуального угла тилта (калибровка) */
+    /** VCAL — direct virtual tilt angle set (calibration) */
     fun sendVcal(angle: Float) {
         val clamped = angle.coerceIn(0f, 180f)
         val msg = "VCAL:${String.format("%.1f", clamped)}\n"
@@ -92,6 +89,83 @@ class CommandSender {
             val addr = xiaoAddr
             if (addr != null) {
                 sendRaw(msg.toByteArray(), addr, xiaoPort)
+            }
+        }
+    }
+
+    /**
+     * TSET — set tilt parameters at runtime (not persisted until TSAVE)
+     *
+     * @param neutral  PWM stop value (70-110, typically 88-92)
+     * @param maxSpeed max PWM offset from neutral (10-90)
+     * @param dpsUp    °/s when camera moves UP (angle decreasing, against gravity)
+     * @param dpsDn    °/s when camera moves DOWN (angle increasing, with gravity)
+     * @param deadband deadband in degrees (1.0-20.0)
+     * @param driftCorr drift correction speed °/s (0-100)
+     */
+    fun sendTset(
+        neutral: Int? = null,
+        maxSpeed: Int? = null,
+        dpsUp: Float? = null,
+        dpsDn: Float? = null,
+        deadband: Float? = null,
+        driftCorr: Float? = null
+    ) {
+        val parts = mutableListOf("TSET:")
+        neutral?.let   { parts.add("N:$it") }
+        maxSpeed?.let  { parts.add("S:$it") }
+        dpsUp?.let     { parts.add("U:${String.format("%.1f", it)}") }
+        dpsDn?.let     { parts.add("D:${String.format("%.1f", it)}") }
+        deadband?.let  { parts.add("DB:${String.format("%.1f", it)}") }
+        driftCorr?.let { parts.add("DC:${String.format("%.1f", it)}") }
+
+        if (parts.size <= 1) return  // nothing to set
+        val msg = parts.joinToString(";") + "\n"
+        Log.d(TAG, "TSET: $msg")
+        scope.launch {
+            val addr = xiaoAddr
+            if (addr != null) {
+                sendRaw(msg.toByteArray(), addr, xiaoPort)
+            }
+        }
+    }
+
+    /** TSAVE — persist current tilt config to ESP32 NVS */
+    fun sendTsave() {
+        scope.launch {
+            val addr = xiaoAddr
+            if (addr != null) {
+                sendRaw("TSAVE\n".toByteArray(), addr, xiaoPort)
+            }
+        }
+    }
+
+    /** TCAL:UP — test sweep camera UP for 2s */
+    fun sendTcalUp() {
+        scope.launch {
+            val addr = xiaoAddr
+            if (addr != null) {
+                sendRaw("TCAL:UP\n".toByteArray(), addr, xiaoPort)
+            }
+        }
+    }
+
+    /** TCAL:DN — test sweep camera DOWN for 2s */
+    fun sendTcalDn() {
+        scope.launch {
+            val addr = xiaoAddr
+            if (addr != null) {
+                sendRaw("TCAL:DN\n".toByteArray(), addr, xiaoPort)
+            }
+        }
+    }
+
+    /** TCAL:STOP — abort test sweep */
+    fun sendTcalStop() {
+        scope.launch {
+            val addr = xiaoAddr
+            if (addr != null) {
+                sendRaw("TCAL:STOP\n".toByteArray(), addr, xiaoPort)
             }
         }
     }
@@ -131,7 +205,5 @@ class CommandSender {
         }
     }
 
-    fun getStats(): String {
-        return "Sent:$sendCount Err:$errorCount"
-    }
+    fun getStats(): String = "Sent:$sendCount Err:$errorCount"
 }

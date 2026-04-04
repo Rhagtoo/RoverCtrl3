@@ -14,41 +14,40 @@ import java.nio.channels.FileChannel
 // ObjectTracker — YOLOv8n TFLite
 //
 // Модель: yolov8n.tflite (assets/)
-//   Экспорт: yolo export model=yolov8n.pt format=tflite imgsz=640
-//
-//   Input:  [1, 640, 640, 3]  float32 — NHWC (стандарт TFLite)
-//   Output: [1, 84, 8400]  или  [1, 8400, 84]  — зависит от версии ultralytics
+//   Input:  [1, 640, 640, 3]  float32 — NHWC
+//   Output: [1, 84, 8400]  или  [1, 8400, 84]
 //           84 = cx,cy,w,h + 80 классов COCO
 //
-// targetClass = -1 → детектить любой класс (по умолчанию)
-// targetClass = 0  → только person
-// targetClass = 15 → только cat
+// FIX v2.6: removed tilt Y inversion — was causing camera to track
+//           in wrong direction. Fixed cat offset sign.
+//
+// Physical convention (confirmed):
+//   YOLO cy=0 = top of frame
+//   errY negative → tilt negative → firmware target→0° → camera UP ✓
+//   errY positive → tilt positive → firmware target→180° → camera DOWN ✓
 // ──────────────────────────────────────────────────────────────────────────
 
 class ObjectTracker(
     context:          Context,
     modelFile:        String = "yolov8n.tflite",
-    private val targetClass: Int = -1,   // -1 = любой класс
+    private val targetClass: Int = -1,
     private val confThresh:  Float = 0.25f,
     private val iouThresh:   Float = 0.45f,
     useGpu:           Boolean = true
 ) {
-    // Трекинг состояние
     private var isTracking = false
     private var framesSinceDetection = 0
-    private val maxFramesWithoutDetection = 30  // Детектить каждые 30 кадров (устаревшее, оставляем для совместимости)
-    private val maxTrackingTimeMs = 1000L       // Детектить каждую секунду (FPS-независимо)
+    private val maxTrackingTimeMs = 1000L
     private var lastDetectionTime = 0L
     private val kalman = KalmanFilter2D()
     private var lastDetection: DetectionResult? = null
     private var trackingConfidence = 0f
-    
-    // Пороги для переключения режимов
+
     private val minDetectionConfidence = 0.3f
     private val minTrackingConfidence = 0.1f
-    
-    // Кешированный output buffer для inference (GC оптимизация)
+
     private var cachedOutputBuffer: Array<Array<FloatArray>>? = null
+
     companion object {
         private const val TAG = "ObjectTracker"
         const val INPUT_SIZE  = 640
@@ -79,9 +78,8 @@ class ObjectTracker(
     private val pidPan  = PidController(kp = 100f, ki = 0.2f, kd = 6f, outMax = 100f)
     private val pidTilt = PidController(kp = 100f, ki = 0.2f, kd = 6f, outMax = 100f)
 
-    // Определяется из model tensor shapes
     private var outputTransposed: Boolean? = null
-    private var inputNchw: Boolean = false   // true=[1,3,H,W], false=[1,H,W,3]
+    private var inputNchw: Boolean = false
     private var modelInputSize: Int = INPUT_SIZE
 
     init {
@@ -99,24 +97,19 @@ class ObjectTracker(
             FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength)
         interp = Interpreter(model, opts)
 
-        // Логируем shape для отладки
         val inShape  = interp.getInputTensor(0).shape()
         val outShape = interp.getOutputTensor(0).shape()
         Log.i(TAG, "Input shape: ${inShape.contentToString()}")
         Log.i(TAG, "Output shape: ${outShape.contentToString()}")
 
-        // Определяем формат input
-        // [1, 3, 640, 640] → NCHW (channels-first)
-        // [1, 640, 640, 3] → NHWC (channels-last, стандарт TFLite)
         if (inShape.size == 4) {
-            inputNchw = (inShape[1] == 3 && inShape[2] > 3)    // [1,3,H,W]
+            inputNchw = (inShape[1] == 3 && inShape[2] > 3)
             modelInputSize = if (inputNchw) inShape[2] else inShape[1]
             Log.i(TAG, "Input format: ${if (inputNchw) "NCHW" else "NHWC"}, size=$modelInputSize")
         }
 
-        // Определяем формат output
         if (outShape.size == 3) {
-            outputTransposed = outShape[1] > outShape[2]  // 8400 > 84
+            outputTransposed = outShape[1] > outShape[2]
         }
     }
 
@@ -130,18 +123,15 @@ class ObjectTracker(
     fun process(frame: Bitmap): TrackResult {
         framesSinceDetection++
         val currentTime = System.currentTimeMillis()
-        
-        // Решаем: детектить или трекать
+
         val timeSinceLastDetection = if (lastDetectionTime > 0) currentTime - lastDetectionTime else Long.MAX_VALUE
-        val shouldDetect = !isTracking || 
-                          timeSinceLastDetection >= maxTrackingTimeMs || 
+        val shouldDetect = !isTracking ||
+                          timeSinceLastDetection >= maxTrackingTimeMs ||
                           trackingConfidence < minTrackingConfidence
-        
+
         val detection = if (shouldDetect) {
-            // Полная детекция
             val detected = detect(frame)
             if (detected != null && detected.confidence >= minDetectionConfidence) {
-                // Нашли хороший объект - начинаем трекинг
                 isTracking = true
                 framesSinceDetection = 0
                 lastDetectionTime = currentTime
@@ -150,24 +140,20 @@ class ObjectTracker(
                 trackingConfidence = 1.0f
                 detected
             } else {
-                // Объект не найден или слабый - сбрасываем трекинг
                 isTracking = false
                 lastDetection = null
                 trackingConfidence = 0f
                 lastDetectionTime = 0L
-                kalman.reset()  // Сбрасываем фильтр при потере объекта
+                kalman.reset()
                 null
             }
         } else {
-            // Трекинг существующего объекта
-            lastDetection?.let { 
+            lastDetection?.let {
                 val tracked = kalman.update(it)
-                // Проверяем что координаты остаются разумными
-                if (tracked.cx in 0f..1f && tracked.cy in 0f..1f && 
+                if (tracked.cx in 0f..1f && tracked.cy in 0f..1f &&
                     tracked.w in 0f..1f && tracked.h in 0f..1f) {
                     tracked
                 } else {
-                    // Координаты вышли за пределы - сбрасываем трекинг
                     isTracking = false
                     kalman.reset()
                     null
@@ -177,153 +163,129 @@ class ObjectTracker(
                 null
             }
         }
-        
-        // Если нет детекции - возвращаем пустой результат
+
         val finalDetection = detection ?: run {
             pidPan.reset(); pidTilt.reset()
             return TrackResult(false, 0f, 0f, null)
         }
-        
-        // Обновляем lastDetection для следующего кадра
+
         lastDetection = finalDetection
         trackingConfidence = kalman.confidence
-        
-        // Вычисляем управление
+
+        // ── Error calculation ────────────────────────────────────────────
         var targetCx = finalDetection.cx
         var targetCy = finalDetection.cy
-        
-        // ИНВЕРСИЯ TILT: YOLO координаты (0=верх, 1=низ) нужно инвертировать для управления
-        // Объект вверху кадра (cy≈0) → нужно наклонять вниз (положительный tilt)
-        // Объект внизу кадра (cy≈1) → нужно наклонять вверх (отрицательный tilt)
-        targetCy = 1.0f - targetCy
-        
-        // Для cat смещаем цель к нижней части рамки (под ноги)
-        // Уже после инверсии: targetCy=0 → низ кадра, targetCy=1 → верх кадра
-        // Поэтому добавляем h/2 чтобы сместить ВНИЗ по кадру (уменьшаем targetCy)
+
+        // FIX v2.6: NO INVERSION of targetCy
+        //
+        // YOLO coordinates: cy=0 top, cy=1 bottom
+        // errY = cy - 0.5:
+        //   object at top (cy≈0): errY negative → tilt negative
+        //     → firmware: map(-90..90, 0..180) → target≈0° → camera UP ✓
+        //   object at bottom (cy≈1): errY positive → tilt positive
+        //     → firmware: target≈180° → camera DOWN ✓
+        //
+        // The inversion was WRONG — it reversed the tracking direction.
+
+        // For cat: aim at feet (bottom of bbox = cy + h/2)
+        // cy increases downward, so adding h/2 shifts target toward feet
         if (finalDetection.label == "cat") {
-            targetCy = (targetCy - finalDetection.h / 2).coerceAtLeast(0f)
+            targetCy = (targetCy + finalDetection.h / 2f).coerceAtMost(1f)
         }
 
         val errX = targetCx - 0.5f
         val errY = targetCy - 0.5f
         val pan  = pidPan.updateWithDeadband(errX)
         val tilt = pidTilt.updateWithDeadband(errY)
-        
+
         val mode = if (shouldDetect) "DETECT" else "TRACK"
-        Log.d(TAG, "[$mode] ${finalDetection.label} ${(finalDetection.confidence*100).toInt()}% at (${finalDetection.cx}, ${finalDetection.cy}) conf=${trackingConfidence}")
+        Log.d(TAG, "[$mode] ${finalDetection.label} ${(finalDetection.confidence*100).toInt()}% " +
+                   "at (${finalDetection.cx}, ${finalDetection.cy}) → err(${"%.2f".format(errX)}, ${"%.2f".format(errY)})")
 
         return TrackResult(true, pan, tilt, finalDetection)
     }
 
-    // ── NHWC float32: [R,G,B, R,G,B, ...] — стандарт TFLite ─────────────
+    // ── NHWC float32 ─────────────────────────────────────────────────────
     private fun bitmapToNhwcBuffer(bmp: Bitmap): ByteBuffer {
         val sz = modelInputSize
-        val buf = ByteBuffer.allocateDirect(4 * sz * sz * 3)
-            .order(ByteOrder.nativeOrder())
+        val buf = ByteBuffer.allocateDirect(4 * sz * sz * 3).order(ByteOrder.nativeOrder())
         val pixels = IntArray(sz * sz)
         bmp.getPixels(pixels, 0, sz, 0, 0, sz, sz)
-
         for (p in pixels) {
-            buf.putFloat(((p shr 16) and 0xFF) / 255f)  // R
-            buf.putFloat(((p shr 8)  and 0xFF) / 255f)  // G
-            buf.putFloat(( p         and 0xFF) / 255f)  // B
+            buf.putFloat(((p shr 16) and 0xFF) / 255f)
+            buf.putFloat(((p shr 8)  and 0xFF) / 255f)
+            buf.putFloat(( p         and 0xFF) / 255f)
         }
         buf.rewind()
         return buf
     }
 
-    // ── NCHW float32: [R-plane][G-plane][B-plane] — Ultralytics export ───
+    // ── NCHW float32 ─────────────────────────────────────────────────────
     private fun bitmapToNchwBuffer(bmp: Bitmap): ByteBuffer {
         val sz = modelInputSize
-        val buf = ByteBuffer.allocateDirect(4 * 3 * sz * sz)
-            .order(ByteOrder.nativeOrder())
+        val buf = ByteBuffer.allocateDirect(4 * 3 * sz * sz).order(ByteOrder.nativeOrder())
         val pixels = IntArray(sz * sz)
         bmp.getPixels(pixels, 0, sz, 0, 0, sz, sz)
-
-        // R plane
         for (p in pixels) buf.putFloat(((p shr 16) and 0xFF) / 255f)
-        // G plane
-        for (p in pixels) buf.putFloat(((p shr 8) and 0xFF) / 255f)
-        // B plane
-        for (p in pixels) buf.putFloat((p and 0xFF) / 255f)
-
+        for (p in pixels) buf.putFloat(((p shr 8)  and 0xFF) / 255f)
+        for (p in pixels) buf.putFloat(( p         and 0xFF) / 255f)
         buf.rewind()
         return buf
     }
 
-    /**
-     * Полная детекция на кадре (YOLO inference).
-     * Возвращает лучший bounding box или null если ничего не найдено.
-     */
     private fun detect(frame: Bitmap): DetectionResult? {
         val sz = modelInputSize
         val scaled = Bitmap.createScaledBitmap(frame, sz, sz, true)
         val input  = if (inputNchw) bitmapToNchwBuffer(scaled) else bitmapToNhwcBuffer(scaled)
         scaled.recycle()
 
-        // Allocate output based on detected shape (с кешированием)
         val outShape = interp.getOutputTensor(0).shape()
         val dim1 = outShape[1]
         val dim2 = outShape[2]
-        
-        // Используем кешированный буфер или создаём новый
-        val outputBuf = cachedOutputBuffer?.takeIf { 
-            it.size == 1 && it[0].size == dim1 && it[0][0].size == dim2 
+
+        val outputBuf = cachedOutputBuffer?.takeIf {
+            it.size == 1 && it[0].size == dim1 && it[0][0].size == dim2
         } ?: Array(1) { Array(dim1) { FloatArray(dim2) } }.also {
             cachedOutputBuffer = it
         }
-        
-        interp.run(input, outputBuf)
 
+        interp.run(input, outputBuf)
         return bestBox(outputBuf[0], dim1, dim2)
     }
-    
-    // ── Найти лучший бокс после NMS ─────────────────────────────────────
+
     private fun bestBox(out: Array<FloatArray>, dim1: Int, dim2: Int): DetectionResult? {
-        val isTransposed = outputTransposed ?: (dim1 > dim2)  // 8400 > 84 → transposed
+        val isTransposed = outputTransposed ?: (dim1 > dim2)
         val numBoxes  = if (isTransposed) dim1 else dim2
         val numAttrs  = if (isTransposed) dim2 else dim1
 
-        if (numAttrs < 84) {
-            Log.w(TAG, "Unexpected output attrs: $numAttrs")
-            return null
-        }
+        if (numAttrs < 84) { Log.w(TAG, "Unexpected output attrs: $numAttrs"); return null }
 
-        // ── Auto-detect: pixel-space (0..640) vs normalized (0..1) ───
-        // Сэмплируем первые 50 боксов, смотрим максимум cx/cy
         var maxCoord = 0f
         for (j in 0 until minOf(50, numBoxes)) {
             val cx = if (isTransposed) out[j][0] else out[0][j]
             val cy = if (isTransposed) out[j][1] else out[1][j]
             maxCoord = maxOf(maxCoord, cx, cy)
         }
-        // Если максимум > 2.0 → координаты в пикселях, нужно делить
         val scale = if (maxCoord > 2.0f) modelInputSize.toFloat() else 1.0f
-        Log.d(TAG, "Output coords: maxSample=$maxCoord, scale=$scale " +
-                   "(${if (scale > 1f) "pixel-space" else "normalized"})")
 
         val boxes = mutableListOf<Box>()
 
         for (j in 0 until numBoxes) {
             val cx: Float; val cy: Float; val w: Float; val h: Float
-
             if (isTransposed) {
                 cx = out[j][0]; cy = out[j][1]; w = out[j][2]; h = out[j][3]
             } else {
                 cx = out[0][j]; cy = out[1][j]; w = out[2][j]; h = out[3][j]
             }
 
-            // Найти лучший класс
             var maxScore = 0f; var maxCls = 0
             for (c in 0 until NUM_CLASSES) {
                 val s = if (isTransposed) out[j][4 + c] else out[4 + c][j]
                 if (s > maxScore) { maxScore = s; maxCls = c }
             }
 
-            // Фильтр по targetClass
             if (targetClass >= 0) {
-                val targetScore = if (isTransposed) out[j][4 + targetClass]
-                                  else out[4 + targetClass][j]
+                val targetScore = if (isTransposed) out[j][4 + targetClass] else out[4 + targetClass][j]
                 if (targetScore < confThresh) continue
                 maxScore = targetScore
                 maxCls = targetClass
@@ -331,22 +293,13 @@ class ObjectTracker(
                 if (maxScore < confThresh) continue
             }
 
-            // Фильтр: только cat (15) и person (0)
             if (maxCls != 0 && maxCls != 15) continue
 
-            boxes += Box(
-                cx = cx / scale,
-                cy = cy / scale,
-                w  = w  / scale,
-                h  = h  / scale,
-                score = maxScore,
-                classId = maxCls
-            )
+            boxes += Box(cx / scale, cy / scale, w / scale, h / scale, maxScore, maxCls)
         }
 
         if (boxes.isEmpty()) return null
 
-        // Жадный NMS
         val sorted = boxes.sortedByDescending { it.score }.toMutableList()
         val kept   = mutableListOf<Box>()
         while (sorted.isNotEmpty()) {
@@ -356,12 +309,8 @@ class ObjectTracker(
         }
 
         val b = kept.first()
-        Log.d(TAG, "Detection: ${COCO_LABELS.getOrElse(b.classId){"?"}} " +
-                    "${(b.score*100).toInt()}% at (${b.cx}, ${b.cy})")
-
         return DetectionResult(
-            cx = b.cx, cy = b.cy,
-            w = b.w, h = b.h,
+            cx = b.cx, cy = b.cy, w = b.w, h = b.h,
             confidence = b.score,
             label = COCO_LABELS.getOrElse(b.classId) { "cls${b.classId}" }
         )
@@ -379,10 +328,8 @@ class ObjectTracker(
         return if (union > 0f) inter / union else 0f
     }
 
-    /** Обновить kp после калибровки */
     fun updatePidGains(kpPan: Float, kpTilt: Float) {
-        pidPan.kp = kpPan
-        pidTilt.kp = kpTilt
+        pidPan.kp = kpPan; pidTilt.kp = kpTilt
         pidPan.reset(); pidTilt.reset()
     }
 
