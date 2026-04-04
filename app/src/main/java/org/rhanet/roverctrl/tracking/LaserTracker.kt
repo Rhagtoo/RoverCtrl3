@@ -57,26 +57,28 @@ class LaserTracker(
 
         // Первый проход: подсчёт средней яркости для адаптивного порога
         var totalBrightness = 0.0
-        var brightPixelCount = 0
         val totalPixels = procW * procH
-
+        
+        // Получаем все пиксели за один JNI вызов
+        val pixels = IntArray(totalPixels)
+        small.getPixels(pixels, 0, procW, 0, 0, procW, procH)
+        
         // Массив для хранения яркости пикселей (для второго прохода)
         val brightnessMap = FloatArray(totalPixels)
+        var brightPixelCount = 0
 
-        for (y in 0 until procH) {
-            for (x in 0 until procW) {
-                val idx = y * procW + x
-                val px = small.getPixel(x, y)
-                Color.colorToHSV(px, hsv)
-                brightnessMap[idx] = hsv[2]
-                totalBrightness += hsv[2]
+        // Первый проход: анализ яркости
+        for (idx in 0 until totalPixels) {
+            val px = pixels[idx]
+            Color.colorToHSV(px, hsv)
+            brightnessMap[idx] = hsv[2]
+            totalBrightness += hsv[2]
 
-                val r = Color.red(px)
-                val g = Color.green(px)
-                val b = Color.blue(px)
-                if (r > brightSpotThreshold && g > brightSpotThreshold && b > brightSpotThreshold) {
-                    brightPixelCount++
-                }
+            val r = Color.red(px)
+            val g = Color.green(px)
+            val b = Color.blue(px)
+            if (r > brightSpotThreshold && g > brightSpotThreshold && b > brightSpotThreshold) {
+                brightPixelCount++
             }
         }
 
@@ -94,21 +96,22 @@ class LaserTracker(
         }
 
         // Второй проход: детекция лазера с адаптивным порогом
-        for (y in 0 until procH) {
-            for (x in 0 until procW) {
-                val px = small.getPixel(x, y)
-                Color.colorToHSV(px, hsv)
+        for (idx in 0 until totalPixels) {
+            val px = pixels[idx]
+            val x = idx % procW
+            val y = idx / procW
+            
+            Color.colorToHSV(px, hsv)
 
-                val isLaser = isRedHsv(hsv) ||
-                              isBrightRedRgb(px, hsv[2]) ||
-                              isBrightSpotImproved(px, x, y, brightnessMap, avgBrightness)
+            val isLaser = isRedHsv(hsv) ||
+                          isBrightRedRgb(px, hsv[2]) ||
+                          isBrightSpotImproved(px, x, y, brightnessMap, avgBrightness)
 
-                if (isLaser) {
-                    val w = hsv[2].toDouble()
-                    sumX += x * w
-                    sumY += y * w
-                    sumW += w
-                }
+            if (isLaser) {
+                val w = hsv[2].toDouble()
+                sumX += x * w
+                sumY += y * w
+                sumW += w
             }
         }
         small.recycle()

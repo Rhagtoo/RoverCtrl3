@@ -44,6 +44,9 @@ class ObjectTracker(
     // Пороги для переключения режимов
     private val minDetectionConfidence = 0.3f
     private val minTrackingConfidence = 0.1f
+    
+    // Кешированный output buffer для inference (GC оптимизация)
+    private var cachedOutputBuffer: Array<Array<FloatArray>>? = null
     companion object {
         private const val TAG = "ObjectTracker"
         const val INPUT_SIZE  = 640
@@ -244,11 +247,18 @@ class ObjectTracker(
         val input  = if (inputNchw) bitmapToNchwBuffer(scaled) else bitmapToNhwcBuffer(scaled)
         scaled.recycle()
 
-        // Allocate output based on detected shape
+        // Allocate output based on detected shape (с кешированием)
         val outShape = interp.getOutputTensor(0).shape()
         val dim1 = outShape[1]
         val dim2 = outShape[2]
-        val outputBuf = Array(1) { Array(dim1) { FloatArray(dim2) } }
+        
+        // Используем кешированный буфер или создаём новый
+        val outputBuf = cachedOutputBuffer?.takeIf { 
+            it.size == 1 && it[0].size == dim1 && it[0][0].size == dim2 
+        } ?: Array(1) { Array(dim1) { FloatArray(dim2) } }.also {
+            cachedOutputBuffer = it
+        }
+        
         interp.run(input, outputBuf)
 
         return bestBox(outputBuf[0], dim1, dim2)
