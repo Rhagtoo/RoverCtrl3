@@ -123,3 +123,4 @@ RoverCtrl/
 - [ ] Настройка чувствительности джойстиков в Settings
 - [ ] Запись видео / телеметрии
 - [ ] Автопилот (waypoint навигация)
+# Test build from clean state
