@@ -402,11 +402,12 @@ class CfgFragment : Fragment() {
                         }
                     }
                     
-                    if (json != null) {
-                        val virt   = json.optDouble("tilt", 90.0).toFloat()
-                        val target = json.optDouble("tiltTarget", 90.0).toFloat()
-                        val pwm    = json.optInt("tiltPwm", 90)
-                        val pan    = json.optInt("pan", 90)
+                    val localJson = json  // Create local immutable copy
+                    if (localJson != null) {
+                        val virt   = localJson.optDouble("tilt", 90.0).toFloat()
+                        val target = localJson.optDouble("tiltTarget", 90.0).toFloat()
+                        val pwm    = localJson.optInt("tiltPwm", 90)
+                        val pan    = localJson.optInt("pan", 90)
                         lastKnownVirtual = virt
 
                         tvTiltStatus.text = String.format(
@@ -417,7 +418,7 @@ class CfgFragment : Fragment() {
                         )
 
                         // Update sliders to match ESP values (first poll only or when not touching)
-                        updateSlidersFromStatus(json)
+                        updateSlidersFromStatus(localJson)
                     } else {
                         // If status endpoint not available, show last known virtual angle
                         tvTiltStatus.text = String.format(
