@@ -122,5 +122,6 @@ RoverCtrl/
 - [ ] Интеграция Raspberry Pi 5 (камера + AI HAT+)
 - [ ] Настройка чувствительности джойстиков в Settings
 - [ ] Запись видео / телеметрии
-- [ ] Автопилот (waypoint навигация)
-# Trigger APK build
+- [ ] Автопилот (waypoint навигаation)
+
+# Clean build test - merged from clean-build branch
