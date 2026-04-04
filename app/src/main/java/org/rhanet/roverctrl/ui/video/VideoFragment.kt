@@ -402,14 +402,14 @@ class VideoFragment : Fragment() {
 
             val pb = Preview.Builder()
             Camera2Interop.Extender(pb).setCaptureRequestOption(
-                android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(60, 120))
+                android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(30, 60))
             val preview = pb.build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
 
             val ab = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setTargetResolution(Size(320, 240))
             Camera2Interop.Extender(ab).setCaptureRequestOption(
-                android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(60, 120))
+                android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(30, 60))
             val analysis = ab.build()
             analysis.setAnalyzer(analysisExecutor, ::processFrame)
 
@@ -420,7 +420,7 @@ class VideoFragment : Fragment() {
                     Camera2CameraControl.from(cam.cameraControl).addCaptureRequestOptions(
                         CaptureRequestOptions.Builder().setCaptureRequestOption(
                             android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-                            Range(60, 120)).build())
+                            Range(30, 60)).build())
                 } catch (_: Throwable) {}
             } catch (e: Exception) {
                 Log.e(TAG, "Camera fallback", e)
