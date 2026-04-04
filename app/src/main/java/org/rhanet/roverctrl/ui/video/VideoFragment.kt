@@ -460,6 +460,8 @@ class VideoFragment : Fragment() {
         }
 
         val ft = latency.beginFrame()
+        val originalWidth = imageProxy.width
+        val originalHeight = imageProxy.height
         val bitmap = imageProxyToBitmap(imageProxy)
         imageProxy.close()
         bitmap ?: return
@@ -478,14 +480,14 @@ class VideoFragment : Fragment() {
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
                     handler.post {
                         val ov = trackingOverlay()
-                        ov.sourceImageWidth = bitmap.width
-                        ov.sourceImageHeight = bitmap.height
+                        ov.sourceImageWidth = originalWidth
+                        ov.sourceImageHeight = originalHeight
                         ov.detection = r.detection
                     }
                 } else handler.post {
                     val ov = trackingOverlay()
-                    ov.sourceImageWidth = bitmap.width
-                    ov.sourceImageHeight = bitmap.height
+                    ov.sourceImageWidth = originalWidth
+                    ov.sourceImageHeight = originalHeight
                     ov.detection = null
                 }
             }
@@ -499,14 +501,14 @@ class VideoFragment : Fragment() {
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
                     handler.post {
                         val ov = trackingOverlay()
-                        ov.sourceImageWidth = bitmap.width
-                        ov.sourceImageHeight = bitmap.height
+                        ov.sourceImageWidth = originalWidth
+                        ov.sourceImageHeight = originalHeight
                         ov.detection = r.detection
                     }
                 } else handler.post {
                     val ov = trackingOverlay()
-                    ov.sourceImageWidth = bitmap.width
-                    ov.sourceImageHeight = bitmap.height
+                    ov.sourceImageWidth = originalWidth
+                    ov.sourceImageHeight = originalHeight
                     ov.detection = null
                 }
             }
