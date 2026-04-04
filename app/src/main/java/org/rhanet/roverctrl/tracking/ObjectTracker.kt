@@ -41,7 +41,7 @@ class ObjectTracker(
     private var framesSinceDetection = 0
     private val maxTrackingTimeMs = 1000L
     private var lastDetectionTime = 0L
-    private val kalman = SimpleKalmanFilter()
+    private val kalman = KalmanFilter2D()
     private var lastDetection: DetectionResult? = null
     private var trackingConfidence = 0f
 
