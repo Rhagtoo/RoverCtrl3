@@ -596,10 +596,12 @@ class VideoFragment : Fragment() {
             TrackingMode.OBJECT_TRACK -> {
                 if (objectTracker == null) {
                     try {
-                        objectTracker = ObjectTracker(requireContext())
-                        // Apply current sensitivity settings
                         val settings = vm.sensitivity.value
-                        objectTracker?.updateSensitivity(settings.camPanSens, settings.camTiltSens)
+                        objectTracker = ObjectTracker(
+                            context = requireContext(),
+                            panSensitivity = settings.camPanSens,
+                            tiltSensitivity = settings.camTiltSens
+                        )
                     } catch (e: Throwable) {
                         Toast.makeText(requireContext(), "YOLO: ${e.message}", Toast.LENGTH_LONG).show()
                         vm.setTrackMode(TrackingMode.MANUAL)
