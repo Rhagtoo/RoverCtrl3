@@ -314,6 +314,11 @@ class VideoFragment : Fragment() {
         val ft = latency.beginFrame()
         latency.mark(ft, LatencyTracker.Stage.DECODED)
         latency.mark(ft, LatencyTracker.Stage.INFERENCE_START)
+        
+        // Сохраняем размеры ДО recycle()
+        val bitmapWidth = bitmap.width
+        val bitmapHeight = bitmap.height
+        
         when (vm.trackMode.value) {
             TrackingMode.LASER_DOT -> {
                 val r = laserTracker?.process(bitmap)
@@ -325,14 +330,14 @@ class VideoFragment : Fragment() {
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
                     handler.post {
                         val ov = trackingOverlay()
-                        ov.sourceImageWidth = bitmap.width
-                        ov.sourceImageHeight = bitmap.height
+                        ov.sourceImageWidth = bitmapWidth
+                        ov.sourceImageHeight = bitmapHeight
                         ov.detection = r.detection
                     }
                 } else handler.post {
                     val ov = trackingOverlay()
-                    ov.sourceImageWidth = bitmap.width
-                    ov.sourceImageHeight = bitmap.height
+                    ov.sourceImageWidth = bitmapWidth
+                    ov.sourceImageHeight = bitmapHeight
                     ov.detection = null
                 }
             }
@@ -346,14 +351,14 @@ class VideoFragment : Fragment() {
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
                     handler.post {
                         val ov = trackingOverlay()
-                        ov.sourceImageWidth = bitmap.width
-                        ov.sourceImageHeight = bitmap.height
+                        ov.sourceImageWidth = bitmapWidth
+                        ov.sourceImageHeight = bitmapHeight
                         ov.detection = r.detection
                     }
                 } else handler.post {
                     val ov = trackingOverlay()
-                    ov.sourceImageWidth = bitmap.width
-                    ov.sourceImageHeight = bitmap.height
+                    ov.sourceImageWidth = bitmapWidth
+                    ov.sourceImageHeight = bitmapHeight
                     ov.detection = null
                 }
             }
