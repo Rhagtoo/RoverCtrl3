@@ -1,67 +1,67 @@
-# Changelog
+# Журнал изменений
 
-All notable changes to the RoverCtrl3 project will be documented in this file.
+Все значительные изменения в проекте RoverCtrl3 будут документированы в этом файле.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
+и проект придерживается [Семантического Версионирования](https://semver.org/lang/ru/).
 
-## [Unreleased]
+## [Не выпущено]
 
-### Added
-- Gradle Wrapper for consistent builds
+### Добавлено
+- Gradle Wrapper для стабильной сборки
 - GitHub Actions CI/CD workflows
-- Issue and Pull Request templates
-- Development agent for project management
+- Шаблоны для Issues и Pull Requests
+- Агент разработки для управления проектом
 
-### Changed
-- Improved project structure documentation
-- Turret tilt control: replaced P‑regulator with positional controller with constant speed (behaves like pan servo)
+### Изменено
+- Улучшена документация структуры проекта
+- Управление tilt турели: заменён P‑регулятор на позиционный контроллер с постоянной скоростью (ведёт себя как позиционный серво pan)
 
-### Fixed
+### Исправлено
 - 
 
 ## [2.5] - 2024-03-31
 
-### Added
-- OTA firmware update support for turret
-- Improved turret firmware to version 2.5
-- Enhanced HUD display with RPM indicators
+### Добавлено
+- Поддержка OTA‑прошивки для турели
+- Улучшена прошивка турели до версии 2.5
+- Расширен HUD с индикаторами RPM
 
-### Changed
-- Updated Android app dependencies
-- Improved connection stability
+### Изменено
+- Обновлены зависимости Android‑приложения
+- Улучшена стабильность соединения
 
-### Fixed
-- HUD overlapping status bar issue
-- RPM sign inversion in display
-- RSSI reading accuracy
+### Исправлено
+- Наложение HUD на статус‑бар
+- Инверсия знака RPM на дисплее
+- Точность чтения RSSI
 
 ## [2.4] - 2024-02-15
 
-### Added
-- Basic turret control interface
-- Laser tracking mode
-- Color tracking mode
-- 2D map visualization
+### Добавлено
+- Базовый интерфейс управления турелью
+- Режим трекинга лазерной точки
+- Режим трекинга по цвету
+- 2D‑визуализация карты
 
-### Changed
-- Refactored network communication layer
-- Improved joystick sensitivity
+### Изменено
+- Рефакторинг сетевого слоя
+- Улучшена чувствительность джойстиков
 
-### Fixed
-- Connection drop issues
-- Memory leaks in video streaming
+### Исправлено
+- Проблемы обрыва соединения
+- Утечки памяти при стриминге видео
 
 ## [2.3] - 2024-01-10
 
-### Added
-- Initial release with basic rover control
-- WiFi connection management
-- Video streaming from camera
-- Basic telemetry display
+### Добавлено
+- Первый релиз с базовым управлением ровером
+- Управление WiFi‑подключением
+- Видеопоток с камеры
+- Базовый дисплей телеметрии
 
-### Changed
+### Изменено
 - 
 
-### Fixed
-- Initial setup and configuration
+### Исправлено
+- Начальная настройка и конфигурация

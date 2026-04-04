@@ -10,12 +10,18 @@ import android.view.View
 import org.rhanet.roverctrl.data.DetectionResult
 
 // ──────────────────────────────────────────────────────────────────────────
-// TrackingOverlayView
+// TrackingOverlayView v2.5
 //
 // Рисует:
-//   - Красную точку по центру кадра (всегда)
-//   - Если w/h > 0: bounding box (прямоугольник) + label  ← YOLO
-//   - Если w/h == 0: crosshair + circle + label            ← Laser
+// - Красную точку по центру кадра (всегда)
+// - Если w/h > 0: bounding box (прямоугольник) + label ← YOLO
+// - Если w/h == 0: crosshair + circle + label ← Laser
+//
+// FIX v2.5: fitCenter letterbox компенсация.
+// Когда sourceImageWidth/Height заданы, координаты маппятся на
+// реальную область изображения внутри view (как ImageView fitCenter),
+// а не на всю view. Это исправляет bbox на полный экран при XIAO swap.
+// Для камеры телефона (sourceImage = 0/0) — весь view как раньше.
 // ──────────────────────────────────────────────────────────────────────────
 
 class TrackingOverlayView @JvmOverloads constructor(
@@ -27,6 +33,19 @@ class TrackingOverlayView @JvmOverloads constructor(
 
     var trackingActive = false
         set(value) { field = value; postInvalidate() }
+
+    // ── Источник изображения (для fitCenter компенсации) ─────────────
+    // Размер исходного кадра (например XIAO MJPEG 480×320).
+    // Overlay вычислит fitCenter rect и маппит нормализованные координаты
+    // только на него, а не на весь view (включая чёрные полосы).
+    // Если 0/0 — используется вся область view (камера телефона).
+    var sourceImageWidth: Int = 0
+        set(value) { field = value; imageRectDirty = true; postInvalidate() }
+    var sourceImageHeight: Int = 0
+        set(value) { field = value; imageRectDirty = true; postInvalidate() }
+
+    private val imageRect = RectF() // fitCenter rect внутри view
+    private var imageRectDirty = true
 
     private val bboxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#00E676")
@@ -59,24 +78,77 @@ class TrackingOverlayView @JvmOverloads constructor(
 
     private val tmpRect = RectF()
 
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        imageRectDirty = true
+    }
+
+    /**
+     * Вычислить fitCenter rect — область внутри view, куда ImageView
+     * реально отрисовывает изображение (с сохранением aspect ratio).
+     * Чёрные полосы = зазор между imageRect и границами view.
+     */
+    private fun updateImageRect() {
+        if (!imageRectDirty) return
+        imageRectDirty = false
+
+        val vw = width.toFloat()
+        val vh = height.toFloat()
+
+        if (sourceImageWidth <= 0 || sourceImageHeight <= 0 || vw <= 0f || vh <= 0f) {
+            // Нет данных об источнике → весь view (камера телефона / PreviewView)
+            imageRect.set(0f, 0f, vw, vh)
+            return
+        }
+
+        val imgAspect = sourceImageWidth.toFloat() / sourceImageHeight
+        val viewAspect = vw / vh
+
+        if (imgAspect > viewAspect) {
+            // Изображение шире view → чёрные полосы сверху/снизу
+            val drawW = vw
+            val drawH = vw / imgAspect
+            val offsetY = (vh - drawH) / 2f
+            imageRect.set(0f, offsetY, drawW, offsetY + drawH)
+        } else {
+            // Изображение уже view → чёрные полосы слева/справа
+            val drawH = vh
+            val drawW = vh * imgAspect
+            val offsetX = (vw - drawW) / 2f
+            imageRect.set(offsetX, 0f, offsetX + drawW, drawH)
+        }
+    }
+
+    /** Map normalized X (0..1) → pixel X внутри imageRect */
+    private fun mapX(normX: Float): Float = imageRect.left + normX * imageRect.width()
+    /** Map normalized Y (0..1) → pixel Y внутри imageRect */
+    private fun mapY(normY: Float): Float = imageRect.top + normY * imageRect.height()
+    /** Map normalized W (0..1) → pixel width внутри imageRect */
+    private fun mapW(normW: Float): Float = normW * imageRect.width()
+    /** Map normalized H (0..1) → pixel height внутри imageRect */
+    private fun mapH(normH: Float): Float = normH * imageRect.height()
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        updateImageRect()
 
-        // Центр кадра — всегда виден
-        canvas.drawCircle(width / 2f, height / 2f, 4f, centerDot)
+        // Центр изображения — всегда виден (в центре imageRect, не view!)
+        val centerX = imageRect.centerX()
+        val centerY = imageRect.centerY()
+        canvas.drawCircle(centerX, centerY, 4f, centerDot)
 
         val det = detection ?: return
         if (!trackingActive) return
 
-        val px = det.cx * width
-        val py = det.cy * height
+        val px = mapX(det.cx)
+        val py = mapY(det.cy)
 
         val hasBbox = det.w > 0.01f && det.h > 0.01f
 
         if (hasBbox) {
             // ── YOLO bounding box ──────────────────────────────────────
-            val bw = det.w * width
-            val bh = det.h * height
+            val bw = mapW(det.w)
+            val bh = mapH(det.h)
             tmpRect.set(px - bw / 2f, py - bh / 2f, px + bw / 2f, py + bh / 2f)
             canvas.drawRect(tmpRect, bboxPaint)
 
@@ -104,7 +176,8 @@ class TrackingOverlayView @JvmOverloads constructor(
 
             val label = if (det.label.isNotEmpty())
                 "${det.label} ${(det.confidence * 100).toInt()}%"
-            else "${(det.confidence * 100).toInt()}%"
+            else
+                "${(det.confidence * 100).toInt()}%"
             canvas.drawText(label, px + arm + 8, py - 8, textPaint)
         }
     }

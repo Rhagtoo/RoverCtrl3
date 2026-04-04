@@ -33,6 +33,17 @@ class ObjectTracker(
     private val iouThresh:   Float = 0.45f,
     useGpu:           Boolean = true
 ) {
+    // Трекинг состояние
+    private var isTracking = false
+    private var framesSinceDetection = 0
+    private val maxFramesWithoutDetection = 30  // Детектить каждые 30 кадров
+    private val kalman = KalmanFilter2D()
+    private var lastDetection: DetectionResult? = null
+    private var trackingConfidence = 0f
+    
+    // Пороги для переключения режимов
+    private val minDetectionConfidence = 0.3f
+    private val minTrackingConfidence = 0.1f
     companion object {
         private const val TAG = "ObjectTracker"
         const val INPUT_SIZE  = 640
@@ -112,29 +123,66 @@ class ObjectTracker(
     )
 
     fun process(frame: Bitmap): TrackResult {
-        val sz = modelInputSize
-        val scaled = Bitmap.createScaledBitmap(frame, sz, sz, true)
-        val input  = if (inputNchw) bitmapToNchwBuffer(scaled) else bitmapToNhwcBuffer(scaled)
-        scaled.recycle()
-
-        // Allocate output based on detected shape
-        val outShape = interp.getOutputTensor(0).shape()
-        val dim1 = outShape[1]
-        val dim2 = outShape[2]
-        val outputBuf = Array(1) { Array(dim1) { FloatArray(dim2) } }
-        interp.run(input, outputBuf)
-
-        val best = bestBox(outputBuf[0], dim1, dim2) ?: run {
+        framesSinceDetection++
+        
+        // Решаем: детектить или трекать
+        val shouldDetect = !isTracking || 
+                          framesSinceDetection >= maxFramesWithoutDetection || 
+                          trackingConfidence < minTrackingConfidence
+        
+        val detection = if (shouldDetect) {
+            // Полная детекция
+            val detected = detect(frame)
+            if (detected != null && detected.confidence >= minDetectionConfidence) {
+                // Нашли хороший объект - начинаем трекинг
+                isTracking = true
+                framesSinceDetection = 0
+                kalman.reset()
+                lastDetection = detected
+                trackingConfidence = 1.0f
+                detected
+            } else {
+                // Объект не найден или слабый - сбрасываем трекинг
+                isTracking = false
+                lastDetection = null
+                trackingConfidence = 0f
+                null
+            }
+        } else {
+            // Трекинг существующего объекта
+            lastDetection?.let { kalman.update(it) } ?: run {
+                isTracking = false
+                null
+            }
+        }
+        
+        // Если нет детекции - возвращаем пустой результат
+        val finalDetection = detection ?: run {
             pidPan.reset(); pidTilt.reset()
             return TrackResult(false, 0f, 0f, null)
         }
+        
+        // Обновляем lastDetection для следующего кадра
+        lastDetection = finalDetection
+        trackingConfidence = kalman.confidence
+        
+        // Вычисляем управление
+        var targetCx = finalDetection.cx
+        var targetCy = finalDetection.cy
+        // Для cat смещаем цель к нижней части рамки (под ноги)
+        if (finalDetection.label == "cat") {
+            targetCy = (finalDetection.cy + finalDetection.h / 2).coerceAtMost(1.0f)
+        }
 
-        val errX = best.cx - 0.5f
-        val errY = best.cy - 0.5f
+        val errX = targetCx - 0.5f
+        val errY = targetCy - 0.5f
         val pan  = pidPan.updateWithDeadband(errX)
         val tilt = pidTilt.updateWithDeadband(errY)
+        
+        val mode = if (shouldDetect) "DETECT" else "TRACK"
+        Log.d(TAG, "[$mode] ${finalDetection.label} ${(finalDetection.confidence*100).toInt()}% at (${finalDetection.cx}, ${finalDetection.cy}) conf=${trackingConfidence}")
 
-        return TrackResult(true, pan, tilt, best)
+        return TrackResult(true, pan, tilt, finalDetection)
     }
 
     // ── NHWC float32: [R,G,B, R,G,B, ...] — стандарт TFLite ─────────────
@@ -173,6 +221,26 @@ class ObjectTracker(
         return buf
     }
 
+    /**
+     * Полная детекция на кадре (YOLO inference).
+     * Возвращает лучший bounding box или null если ничего не найдено.
+     */
+    private fun detect(frame: Bitmap): DetectionResult? {
+        val sz = modelInputSize
+        val scaled = Bitmap.createScaledBitmap(frame, sz, sz, true)
+        val input  = if (inputNchw) bitmapToNchwBuffer(scaled) else bitmapToNhwcBuffer(scaled)
+        scaled.recycle()
+
+        // Allocate output based on detected shape
+        val outShape = interp.getOutputTensor(0).shape()
+        val dim1 = outShape[1]
+        val dim2 = outShape[2]
+        val outputBuf = Array(1) { Array(dim1) { FloatArray(dim2) } }
+        interp.run(input, outputBuf)
+
+        return bestBox(outputBuf[0], dim1, dim2)
+    }
+    
     // ── Найти лучший бокс после NMS ─────────────────────────────────────
     private fun bestBox(out: Array<FloatArray>, dim1: Int, dim2: Int): DetectionResult? {
         val isTransposed = outputTransposed ?: (dim1 > dim2)  // 8400 > 84 → transposed
@@ -225,6 +293,9 @@ class ObjectTracker(
             } else {
                 if (maxScore < confThresh) continue
             }
+
+            // Фильтр: только cat (15) и person (0)
+            if (maxCls != 0 && maxCls != 15) continue
 
             boxes += Box(
                 cx = cx / scale,

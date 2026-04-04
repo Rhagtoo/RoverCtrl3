@@ -122,4 +122,6 @@ RoverCtrl/
 - [ ] Интеграция Raspberry Pi 5 (камера + AI HAT+)
 - [ ] Настройка чувствительности джойстиков в Settings
 - [ ] Запись видео / телеметрии
-- [ ] Автопилот (waypoint навигация)
+- [ ] Автопилот (waypoint навигаation)
+
+# Clean build test - merged from clean-build branch

@@ -20,8 +20,8 @@
 
 const char* AP_SSID="RoverAP"; const char* AP_PASS="rover12345";
 const IPAddress STATIC_IP(192,168,4,2),GATEWAY(192,168,4,1),SUBNET(255,255,255,0);
-#define SERVO_PAN 4
-#define SERVO_TILT 2
+#define SERVO_PAN 2
+#define SERVO_TILT 4
 #define PWDN_GPIO_NUM -1
 #define RESET_GPIO_NUM -1
 #define XCLK_GPIO_NUM 10
@@ -44,7 +44,7 @@ const IPAddress STATIC_IP(192,168,4,2),GATEWAY(192,168,4,1),SUBNET(255,255,255,0
 
 // ═══ CR Tilt — КАЛИБРОВАТЬ! ═══
 #define TILT_NEUTRAL         90      // PWM = стоп (подстрой 88-92)
-#define TILT_DEADBAND        3.0f    // ±3° = на месте
+#define TILT_DEADBAND        5.0f    // ±5° = на месте
 // #define TILT_KP              1.2f    // P-gain (1.0-2.0) — не используется в позиционном режиме
 #define TILT_MAX_SPEED       50      // макс отклонение от neutral
 #define TILT_DEG_PER_SEC_UP  60.0f   // °/сек вверх (против гравитации — медленнее)
@@ -71,7 +71,7 @@ bool setupCamera() {
     c.pin_sccb_sda=SIOD_GPIO_NUM; c.pin_sccb_scl=SIOC_GPIO_NUM;
     c.pin_pwdn=PWDN_GPIO_NUM; c.pin_reset=RESET_GPIO_NUM;
     c.xclk_freq_hz=20000000; c.pixel_format=PIXFORMAT_JPEG;
-    c.frame_size=FRAMESIZE_QVGA; c.jpeg_quality=8;
+    c.frame_size=FRAMESIZE_VGA; c.jpeg_quality=6;
     c.fb_count=2; c.grab_mode=CAMERA_GRAB_LATEST;
     return esp_camera_init(&c) == ESP_OK;
 }
@@ -179,6 +179,7 @@ void updateServos() {
             float corr = (error > 0 ? 1.0f : -1.0f) * TILT_DRIFT_CORRECT * dt;
             if (fabsf(corr) > fabsf(error)) corr = error;
             virtualTiltAngle += corr;
+            virtualTiltAngle = constrain(virtualTiltAngle, TILT_MIN_ANGLE, TILT_MAX_ANGLE);
         }
     } else {
         // Определяем направление и задаём постоянную скорость
@@ -194,12 +195,12 @@ void updateServos() {
         float degPerSec = (speedFrac > 0) ? TILT_DEG_PER_SEC_UP : TILT_DEG_PER_SEC_DN;
         float actualDegPerSec = speedFrac * degPerSec;
         virtualTiltAngle += actualDegPerSec * dt;
-        virtualTiltAngle = constrain(virtualTiltAngle, 0.0f, 180.0f);
+        virtualTiltAngle = constrain(virtualTiltAngle, TILT_MIN_ANGLE, TILT_MAX_ANGLE);
     }
 
     // Watchdog: нет команд 2с → зафиксировать позицию
     if (lastCmdTime > 0 && (now - lastCmdTime) > 2000) {
-        tiltTargetAngle = virtualTiltAngle;
+        tiltTargetAngle = constrain(virtualTiltAngle, TILT_MIN_ANGLE, TILT_MAX_ANGLE);
     }
 }
 

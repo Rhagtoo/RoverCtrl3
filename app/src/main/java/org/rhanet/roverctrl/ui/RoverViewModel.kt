@@ -32,7 +32,7 @@ class RoverViewModel : ViewModel() {
 
         // Угол поворота кадра с камеры XIAO (градусы, по часовой стрелке).
         // Меняй если турель смонтирована иначе: 0 / 90 / 180 / 270
-        private const val TURRET_ROTATION_DEG = 90f
+        private const val TURRET_ROTATION_DEG = 90f  // XIAO камера в portrait, поворачиваем на 90° для landscape
     }
 
     val sender   = CommandSender()
@@ -182,14 +182,28 @@ class RoverViewModel : ViewModel() {
         mjpegDecoder = MjpegDecoder(
             url = url,
             onFrame = { bmp ->
-                // FIX: поворачиваем кадр XIAO на TURRET_ROTATION_DEG
-                val rotated = Bitmap.createBitmap(
-                    bmp, 0, 0, bmp.width, bmp.height, turretRotMatrix, true)
-                bmp.recycle()
+                // Всегда создаём копию bitmap для thread safety
+                // XIAO камера в portrait, поворачиваем на 90° для landscape ориентации
+                val frameToUse = if (TURRET_ROTATION_DEG == 0f) {
+                    // Создаём копию без поворота
+                    bmp.copy(bmp.config, true) ?: run {
+                        Log.w(TAG, "Failed to copy bitmap, using original")
+                        bmp
+                    }
+                } else {
+                    // Создаём копию с поворотом
+                    Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, turretRotMatrix, true)
+                }
+                
+                // Освобождаем оригинальный bitmap после создания копии
+                // Но только если создали новую bitmap (не используем оригинал как fallback)
+                if (frameToUse !== bmp) {
+                    bmp.recycle()
+                }
 
                 mainHandler.post {
                     _turretFrame.value?.recycle()
-                    _turretFrame.value = rotated
+                    _turretFrame.value = frameToUse
                     _turretConnected.value = true
                 }
             },

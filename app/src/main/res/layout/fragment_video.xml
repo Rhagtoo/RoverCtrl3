@@ -4,7 +4,8 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000">
+    android:background="#000000"
+    android:fitsSystemWindows="true">
 
     <!-- CameraX Preview -->
     <androidx.camera.view.PreviewView
@@ -14,22 +15,24 @@
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toTopOf="@id/toolbar_video"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="24dp" />
 
     <!-- Fullscreen XIAO view (shown when swapped) -->
     <ImageView
         android:id="@+id/iv_xiao_main"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:scaleType="centerCrop"
+        android:scaleType="fitCenter"
         android:visibility="gone"
         android:contentDescription="XIAO camera fullscreen"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toTopOf="@id/toolbar_video"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="24dp" />
 
-    <!-- Overlay трекинга -->
+    <!-- Overlay трекинга для камеры телефона -->
     <org.rhanet.roverctrl.ui.video.TrackingOverlayView
         android:id="@+id/overlay"
         android:layout_width="0dp"
@@ -38,6 +41,18 @@
         app:layout_constraintBottom_toBottomOf="@id/preview_view"
         app:layout_constraintStart_toStartOf="@id/preview_view"
         app:layout_constraintEnd_toEndOf="@id/preview_view" />
+
+    <!-- Overlay трекинга для камеры XIAO (показывается при swapped) -->
+    <org.rhanet.roverctrl.ui.video.TrackingOverlayView
+        android:id="@+id/overlay_xiao"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+
+        app:layout_constraintTop_toTopOf="@id/iv_xiao_main"
+        app:layout_constraintBottom_toBottomOf="@id/iv_xiao_main"
+        app:layout_constraintStart_toStartOf="@id/iv_xiao_main"
+        app:layout_constraintEnd_toEndOf="@id/iv_xiao_main" />
 
     <!-- PiP: MJPEG турели -->
     <FrameLayout
@@ -110,8 +125,8 @@
         android:visibility="gone"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintBottom_toTopOf="@id/toolbar_video"
-        android:layout_marginStart="12dp"
-        android:layout_marginBottom="12dp" />
+        android:layout_marginStart="24dp"
+        android:layout_marginBottom="24dp" />
 
     <TextView
         android:id="@+id/tv_drive_label_video"
@@ -134,8 +149,8 @@
         android:visibility="gone"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintBottom_toTopOf="@id/toolbar_video"
-        android:layout_marginEnd="12dp"
-        android:layout_marginBottom="12dp" />
+        android:layout_marginEnd="24dp"
+        android:layout_marginBottom="24dp" />
 
     <TextView
         android:id="@+id/tv_cam_label_video"
