@@ -200,9 +200,9 @@ class ObjectTracker(
         val panRaw  = pidPan.updateWithDeadband(errX)
         val tiltRaw = pidTilt.updateWithDeadband(errY)
         
-        // Apply sensitivity multipliers
-        val pan  = (panRaw * panSensitivity).toInt().coerceIn(-100, 100)
-        val tilt = (tiltRaw * tiltSensitivity).toInt().coerceIn(-100, 100)
+        // Apply sensitivity multipliers and clamp to [-100, 100]
+        val pan  = ((panRaw * panSensitivity).coerceIn(-100f, 100f)).toInt()
+        val tilt = ((tiltRaw * tiltSensitivity).coerceIn(-100f, 100f)).toInt()
 
         val mode = if (shouldDetect) "DETECT" else "TRACK"
         Log.d(TAG, "[$mode] ${finalDetection.label} ${(finalDetection.confidence*100).toInt()}% " +
