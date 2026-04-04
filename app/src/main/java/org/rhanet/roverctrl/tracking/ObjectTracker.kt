@@ -203,8 +203,9 @@ class ObjectTracker(
         // Apply sensitivity multipliers and clamp to [-100, 100]
         val panFloat  = (panRaw * panSensitivity).coerceIn(-100f, 100f)
         val tiltFloat = (tiltRaw * tiltSensitivity).coerceIn(-100f, 100f)
-        val pan  = panFloat.toInt()
-        val tilt = tiltFloat.toInt()
+        // TrackResult expects Float values, not Int
+        val pan  = panFloat
+        val tilt = tiltFloat
 
         val mode = if (shouldDetect) "DETECT" else "TRACK"
         Log.d(TAG, "[$mode] ${finalDetection.label} ${(finalDetection.confidence*100).toInt()}% " +
