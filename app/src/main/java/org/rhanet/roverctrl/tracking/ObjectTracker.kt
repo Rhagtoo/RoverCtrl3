@@ -172,7 +172,7 @@ class ObjectTracker(
         }
 
         lastDetection = finalDetection
-        trackingConfidence = kalman.confidence
+        trackingConfidence = finalDetection.confidence
 
         // ── Error calculation ────────────────────────────────────────────
         var targetCx = finalDetection.cx
