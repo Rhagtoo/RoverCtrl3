@@ -29,10 +29,8 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import kotlin.math.max
 import org.rhanet.roverctrl.R
 import org.rhanet.roverctrl.data.TrackingMode
-import org.rhanet.roverctrl.tracking.*
 import org.rhanet.roverctrl.tracking.CalibrationData
 import org.rhanet.roverctrl.tracking.LaserTracker
 import org.rhanet.roverctrl.tracking.LatencyTracker
@@ -44,15 +42,7 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 
 /**
- * VideoFragment v2.7 - Исправленная версия
- * FIXES:
- * 1. Добавлена очистка laserTracker в onDestroyView()
- * 2. Исправлен memory leak в processXiaoFrame (finally block для recycle)
- * 3. Добавлен @Volatile для swapped
- * 4. Улучшен FPS расчёт через скользящее среднее
- * 5. Добавлен throttling для анализа XIAO кадров
- * 6. Добавлена обработка ошибок для LaserTracker
- * 7. Убран поворот изображения на 90 градусов (applyRotation всегда возвращает оригинал)
+ * VideoFragment v2.4
  * - Латенси пайплайна: всегда видна (tv_latency всегда VISIBLE)
  *   Manual: показывает только FPS камеры
  *   Tracking: decode→infer→cmd задержка в мс
@@ -60,11 +50,7 @@ import java.util.concurrent.Executors
  */
 @androidx.camera.camera2.interop.ExperimentalCamera2Interop
 class VideoFragment : Fragment() {
-    companion object { 
-        private const val TAG = "VideoFrag"
-        private const val XIAO_ANALYSIS_INTERVAL_MS = 33L  // ~30 FPS
-        private const val FPS_BUFFER_SIZE = 10
-    }
+    companion object { private const val TAG = "VideoFrag" }
 
     private val vm: RoverViewModel by activityViewModels()
     private val handler = Handler(Looper.getMainLooper())
@@ -96,53 +82,21 @@ class VideoFragment : Fragment() {
     private lateinit var tvCamLabel:        TextView
     private lateinit var btnLaserVideo:     ToggleButton
 
-    @Volatile private var swapped = false  // FIX: volatile для thread safety
+    private var swapped = false
     private var laserTracker:  LaserTracker?  = null
     private var objectTracker: ObjectTracker? = null
-    
-    // Простейшее сглаживание координат
-    private var lastObjectDetection: DetectionResult? = null
-    private var lastLaserDetection: DetectionResult? = null
-    private const val SMOOTHING_ALPHA = 0.7f  // 0.7*new + 0.3*old
-    private const val MIN_CONFIDENCE = 0.3f
 
     private fun trackingOverlay(): TrackingOverlayView = if (swapped) overlayXiao else overlay
-    
-    // Простая функция сглаживания
-    private fun smoothDetection(newDetection: DetectionResult?, lastDetection: DetectionResult?): DetectionResult? {
-        if (newDetection == null || newDetection.confidence < MIN_CONFIDENCE) {
-            return lastDetection?.copy(confidence = lastDetection.confidence * 0.8f)
-        }
-        
-        return if (lastDetection != null) {
-            lastDetection.copy(
-                cx = SMOOTHING_ALPHA * newDetection.cx + (1 - SMOOTHING_ALPHA) * lastDetection.cx,
-                cy = SMOOTHING_ALPHA * newDetection.cy + (1 - SMOOTHING_ALPHA) * lastDetection.cy,
-                w = SMOOTHING_ALPHA * newDetection.w + (1 - SMOOTHING_ALPHA) * lastDetection.w,
-                h = SMOOTHING_ALPHA * newDetection.h + (1 - SMOOTHING_ALPHA) * lastDetection.h,
-                confidence = if (newDetection.confidence > lastDetection.confidence * 0.95f) newDetection.confidence else lastDetection.confidence * 0.95f,
-                label = newDetection.label
-            )
-        } else {
-            newDetection
-        }
-    }
-    
     private var cameraProvider: ProcessCameraProvider? = null
     private var xiaoAnalysisJob: Job? = null
 
-    // Улучшенный FPS счётчик для камеры
+    // FPS счётчик для камеры
     private var frameCount = 0
     private var lastFpsTime = System.currentTimeMillis()
     private var lastCameraFps = 0f
-    private val fpsBuffer = FloatArray(FPS_BUFFER_SIZE)
-    private var fpsIndex = 0
 
     // Латенси: обновляем не чаще раза в 500мс
     private var lastLatencyUpdate = 0L
-    
-    // Throttling для анализа XIAO кадров
-    private var lastXiaoAnalysisTime = 0L
 
     private val permLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -348,20 +302,8 @@ class VideoFragment : Fragment() {
             xiaoAnalysisJob = viewLifecycleOwner.lifecycleScope.launch {
                 vm.turretFrame.collectLatest { bmp ->
                     if (bmp != null && swapped) {
-                        val now = System.currentTimeMillis()
-                        // FIX: throttling для анализа XIAO кадров
-                        if (now - lastXiaoAnalysisTime >= XIAO_ANALYSIS_INTERVAL_MS) {
-                            lastXiaoAnalysisTime = now
-                            val copy = bmp.copy(Bitmap.Config.ARGB_8888, false) ?: return@collectLatest
-                            analysisExecutor.execute { 
-                                try {
-                                    processXiaoFrame(copy)
-                                } finally {
-                                    // FIX: гарантированное освобождение памяти
-                                    copy.recycle()
-                                }
-                            }
-                        }
+                        val copy = bmp.copy(Bitmap.Config.ARGB_8888, false) ?: return@collectLatest
+                        analysisExecutor.execute { processXiaoFrame(copy) }
                     }
                 }
             }
@@ -369,10 +311,6 @@ class VideoFragment : Fragment() {
     }
 
     private fun processXiaoFrame(bitmap: Bitmap) {
-        // Запоминаем размеры ДО обработки трекером
-        val bmpW = bitmap.width
-        val bmpH = bitmap.height
-        
         val ft = latency.beginFrame()
         latency.mark(ft, LatencyTracker.Stage.DECODED)
         latency.mark(ft, LatencyTracker.Stage.INFERENCE_START)
@@ -385,18 +323,8 @@ class VideoFragment : Fragment() {
                     val label = r.detection?.label ?: ""
                     vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post {
-                        val ov = trackingOverlay()
-                        ov.sourceImageWidth = bmpW
-                        ov.sourceImageHeight = bmpH
-                        ov.detection = r.detection
-                    }
-                } else handler.post {
-                    val ov = trackingOverlay()
-                    ov.sourceImageWidth = bmpW
-                    ov.sourceImageHeight = bmpH
-                    ov.detection = null
-                }
+                    handler.post { trackingOverlay().detection = r.detection }
+                } else handler.post { trackingOverlay().detection = null }
             }
             TrackingMode.OBJECT_TRACK -> {
                 val r = objectTracker?.process(bitmap)
@@ -406,18 +334,8 @@ class VideoFragment : Fragment() {
                     val label = r.detection?.label ?: ""
                     vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post {
-                        val ov = trackingOverlay()
-                        ov.sourceImageWidth = bmpW
-                        ov.sourceImageHeight = bmpH
-                        ov.detection = r.detection
-                    }
-                } else handler.post {
-                    val ov = trackingOverlay()
-                    ov.sourceImageWidth = bmpW
-                    ov.sourceImageHeight = bmpH
-                    ov.detection = null
-                }
+                    handler.post { trackingOverlay().detection = r.detection }
+                } else handler.post { trackingOverlay().detection = null }
             }
             else -> {}
         }
@@ -471,7 +389,7 @@ class VideoFragment : Fragment() {
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setTargetResolution(Size(320, 240))
             Camera2Interop.Extender(ab).setCaptureRequestOption(
-                android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(30, 60))  // Безопасный диапазон для CV
+                android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(60, 120))
             val analysis = ab.build()
             analysis.setAnalyzer(analysisExecutor, ::processFrame)
 
@@ -482,7 +400,7 @@ class VideoFragment : Fragment() {
                     Camera2CameraControl.from(cam.cameraControl).addCaptureRequestOptions(
                         CaptureRequestOptions.Builder().setCaptureRequestOption(
                             android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-                            Range(30, 60)).build())  // Безопасный диапазон для CV
+                            Range(60, 120)).build())
                 } catch (_: Throwable) {}
             } catch (e: Exception) {
                 Log.e(TAG, "Camera fallback", e)
@@ -491,8 +409,6 @@ class VideoFragment : Fragment() {
                 val fa = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .setTargetResolution(Size(320, 240)).build()
-                Camera2Interop.Extender(fa).setCaptureRequestOption(
-                    android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(30, 60))  // Безопасный диапазон для CV
                 fa.setAnalyzer(analysisExecutor, ::processFrame)
                 prov.bindToLifecycle(viewLifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, fp, fa)
             }
@@ -502,19 +418,14 @@ class VideoFragment : Fragment() {
     // ── CameraX Frame Processing ──────────────────────────────────────────
 
     private fun processFrame(imageProxy: ImageProxy) {
-        // Улучшенный FPS расчёт через скользящее среднее
+        // FPS камеры (считаем все кадры независимо от режима)
         frameCount++
         val now = System.currentTimeMillis()
         if (now - lastFpsTime >= 1000) {
-            val currentFps = frameCount * 1000f / (now - lastFpsTime)
-            fpsBuffer[fpsIndex] = currentFps
-            fpsIndex = (fpsIndex + 1) % FPS_BUFFER_SIZE
-            lastCameraFps = fpsBuffer.average().toFloat()
-            
+            lastCameraFps = frameCount * 1000f / (now - lastFpsTime)
             handler.post { tvFps.text = "%.0f FPS".format(lastCameraFps) }
             frameCount = 0
             lastFpsTime = now
-            
             // В Manual обновляем латенси просто FPS-ом
             val mode = vm.trackMode.value
             if (mode == TrackingMode.MANUAL || mode == TrackingMode.GYRO_TILT) {
@@ -536,10 +447,6 @@ class VideoFragment : Fragment() {
         latency.mark(ft, LatencyTracker.Stage.DECODED)
         latency.mark(ft, LatencyTracker.Stage.INFERENCE_START)
 
-        // Запоминаем размеры bitmap
-        val bmpW = bitmap.width
-        val bmpH = bitmap.height
-        
         when (mode) {
             TrackingMode.LASER_DOT -> {
                 val r = laserTracker?.process(bitmap)
@@ -549,18 +456,8 @@ class VideoFragment : Fragment() {
                     val label = r.detection?.label ?: ""
                     vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post {
-                        val ov = trackingOverlay()
-                        ov.sourceImageWidth = bmpW
-                        ov.sourceImageHeight = bmpH
-                        ov.detection = r.detection
-                    }
-                } else handler.post {
-                    val ov = trackingOverlay()
-                    ov.sourceImageWidth = bmpW
-                    ov.sourceImageHeight = bmpH
-                    ov.detection = null
-                }
+                    handler.post { trackingOverlay().detection = r.detection }
+                } else handler.post { trackingOverlay().detection = null }
             }
             TrackingMode.OBJECT_TRACK -> {
                 val r = objectTracker?.process(bitmap)
@@ -570,18 +467,8 @@ class VideoFragment : Fragment() {
                     val label = r.detection?.label ?: ""
                     vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post {
-                        val ov = trackingOverlay()
-                        ov.sourceImageWidth = bmpW
-                        ov.sourceImageHeight = bmpH
-                        ov.detection = r.detection
-                    }
-                } else handler.post {
-                    val ov = trackingOverlay()
-                    ov.sourceImageWidth = bmpW
-                    ov.sourceImageHeight = bmpH
-                    ov.detection = null
-                }
+                    handler.post { trackingOverlay().detection = r.detection }
+                } else handler.post { trackingOverlay().detection = null }
             }
             else -> {}
         }
@@ -619,17 +506,11 @@ class VideoFragment : Fragment() {
     }
 
     private fun applyRotation(bmp: Bitmap, deg: Int): Bitmap {
-        // FIX: полностью убрали поворот изображения
-        // Камера телефона возвращает изображение, которое PreviewView уже поворачивает
-        // Если анализировать повёрнутое изображение, координаты трекинга не совпадут с отображением
-        // 
-        // ВАЖНО: PreviewView должен быть настроен с scaleType="fitCenter" и
-        // CameraX должен автоматически корректировать ориентацию preview
-        // 
-        // Если координаты трекинга всё ещё не совпадают, возможно нужно:
-        // 1. Настроить TrackingOverlayView для учёта rotationDegrees
-        // 2. Или передавать rotationDegrees в трекер для коррекции координат
-        return bmp
+        if (deg == 0) return bmp
+        val r = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height,
+            Matrix().apply { postRotate(deg.toFloat()) }, true)
+        if (r !== bmp) bmp.recycle()
+        return r
     }
 
     private fun setupModeSpinner() {
@@ -650,26 +531,13 @@ class VideoFragment : Fragment() {
         when (mode) {
             TrackingMode.MANUAL, TrackingMode.GYRO_TILT -> {}
             TrackingMode.LASER_DOT -> {
-                // FIX: добавлена обработка ошибок
-                if (laserTracker == null) {
-                    try {
-                        laserTracker = LaserTracker()  // LaserTracker не требует Context
-                        laserSmoother = SmoothingFilter(smoothingAlpha = 0.8f, minConfidence = 0.4f)
-                    } catch (e: Throwable) {
-                        Toast.makeText(requireContext(), "Laser: ${e.message}", Toast.LENGTH_LONG).show()
-                        vm.setTrackMode(TrackingMode.MANUAL)
-                        spinnerMode.setSelection(0)
-                    }
-                } else {
-                    laserTracker?.resetPid()
-                    laserSmoother?.reset()
-                }
+                if (laserTracker == null) laserTracker = LaserTracker()
+                else laserTracker?.resetPid()
             }
             TrackingMode.OBJECT_TRACK -> {
                 if (objectTracker == null) {
                     try {
                         objectTracker = ObjectTracker(requireContext())
-                        objectSmoother = SmoothingFilter(smoothingAlpha = 0.7f, minConfidence = 0.3f)
                     } catch (e: Throwable) {
                         Toast.makeText(requireContext(), "YOLO: ${e.message}", Toast.LENGTH_LONG).show()
                         vm.setTrackMode(TrackingMode.MANUAL)
@@ -685,7 +553,6 @@ class VideoFragment : Fragment() {
         xiaoAnalysisJob?.cancel()
         cameraProvider?.unbindAll()
         objectTracker?.close()
-        // LaserTracker не имеет метода close(), но не держит ресурсов
         analysisExecutor.shutdown()
     }
 }
