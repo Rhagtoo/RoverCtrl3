@@ -146,11 +146,24 @@ class ObjectTracker(
                 isTracking = false
                 lastDetection = null
                 trackingConfidence = 0f
+                kalman.reset()  // Сбрасываем фильтр при потере объекта
                 null
             }
         } else {
             // Трекинг существующего объекта
-            lastDetection?.let { kalman.update(it) } ?: run {
+            lastDetection?.let { 
+                val tracked = kalman.update(it)
+                // Проверяем что координаты остаются разумными
+                if (tracked.cx in 0f..1f && tracked.cy in 0f..1f && 
+                    tracked.w in 0f..1f && tracked.h in 0f..1f) {
+                    tracked
+                } else {
+                    // Координаты вышли за пределы - сбрасываем трекинг
+                    isTracking = false
+                    kalman.reset()
+                    null
+                }
+            } ?: run {
                 isTracking = false
                 null
             }

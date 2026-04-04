@@ -50,6 +50,10 @@ class SimpleKalmanFilter(
         v += k * (measurement - x) / actualDt
         p *= (1 - k)
         
+        // Ограничиваем скорость (не более 0.5 за секунду)
+        val maxVelocity = 0.5f
+        v = v.coerceIn(-maxVelocity, maxVelocity)
+        
         return x
     }
     
@@ -86,15 +90,21 @@ class KalmanFilter2D(
     
     /**
      * Обновить фильтр с новым bounding box.
-     * @return Сглаженный DetectionResult
+     * @return Сглаженный DetectionResult с координатами в пределах 0..1
      */
     fun update(detection: DetectionResult, dt: Float = 0f): DetectionResult {
-        val cx = filterX.update(detection.cx, dt)
-        val cy = filterY.update(detection.cy, dt)
-        val w = filterW.update(detection.w, dt)
-        val h = filterH.update(detection.h, dt)
+        val cx = filterX.update(detection.cx, dt).coerceIn(0f, 1f)
+        val cy = filterY.update(detection.cy, dt).coerceIn(0f, 1f)
+        val w = filterW.update(detection.w, dt).coerceIn(0f, 1f)
+        val h = filterH.update(detection.h, dt).coerceIn(0f, 1f)
         
-        return detection.copy(cx = cx, cy = cy, w = w, h = h)
+        // Также ограничиваем размеры чтобы bbox не выходил за границы
+        val maxW = 2f * minOf(cx, 1f - cx)
+        val maxH = 2f * minOf(cy, 1f - cy)
+        val clampedW = w.coerceAtMost(maxW)
+        val clampedH = h.coerceAtMost(maxH)
+        
+        return detection.copy(cx = cx, cy = cy, w = clampedW, h = clampedH)
     }
     
     /** Сбросить все фильтры */
