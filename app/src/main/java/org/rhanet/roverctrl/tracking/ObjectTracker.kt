@@ -221,6 +221,26 @@ class ObjectTracker(
         return buf
     }
 
+    /**
+     * Полная детекция на кадре (YOLO inference).
+     * Возвращает лучший bounding box или null если ничего не найдено.
+     */
+    private fun detect(frame: Bitmap): DetectionResult? {
+        val sz = modelInputSize
+        val scaled = Bitmap.createScaledBitmap(frame, sz, sz, true)
+        val input  = if (inputNchw) bitmapToNchwBuffer(scaled) else bitmapToNhwcBuffer(scaled)
+        scaled.recycle()
+
+        // Allocate output based on detected shape
+        val outShape = interp.getOutputTensor(0).shape()
+        val dim1 = outShape[1]
+        val dim2 = outShape[2]
+        val outputBuf = Array(1) { Array(dim1) { FloatArray(dim2) } }
+        interp.run(input, outputBuf)
+
+        return bestBox(outputBuf[0], dim1, dim2)
+    }
+    
     // ── Найти лучший бокс после NMS ─────────────────────────────────────
     private fun bestBox(out: Array<FloatArray>, dim1: Int, dim2: Int): DetectionResult? {
         val isTransposed = outputTransposed ?: (dim1 > dim2)  // 8400 > 84 → transposed

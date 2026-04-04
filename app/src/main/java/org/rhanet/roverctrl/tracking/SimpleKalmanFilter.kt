@@ -1,5 +1,7 @@
 package org.rhanet.roverctrl.tracking
 
+import org.rhanet.roverctrl.data.DetectionResult
+
 /**
  * Простой 1D Kalman фильтр для сглаживания координат.
  * Используется для трекинга детектированных объектов между кадрами.
