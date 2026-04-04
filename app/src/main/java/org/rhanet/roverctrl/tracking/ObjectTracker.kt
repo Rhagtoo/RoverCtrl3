@@ -36,7 +36,9 @@ class ObjectTracker(
     // Трекинг состояние
     private var isTracking = false
     private var framesSinceDetection = 0
-    private val maxFramesWithoutDetection = 30  // Детектить каждые 30 кадров
+    private val maxFramesWithoutDetection = 30  // Детектить каждые 30 кадров (устаревшее, оставляем для совместимости)
+    private val maxTrackingTimeMs = 1000L       // Детектить каждую секунду (FPS-независимо)
+    private var lastDetectionTime = 0L
     private val kalman = KalmanFilter2D()
     private var lastDetection: DetectionResult? = null
     private var trackingConfidence = 0f
@@ -127,10 +129,12 @@ class ObjectTracker(
 
     fun process(frame: Bitmap): TrackResult {
         framesSinceDetection++
+        val currentTime = System.currentTimeMillis()
         
         // Решаем: детектить или трекать
+        val timeSinceLastDetection = if (lastDetectionTime > 0) currentTime - lastDetectionTime else Long.MAX_VALUE
         val shouldDetect = !isTracking || 
-                          framesSinceDetection >= maxFramesWithoutDetection || 
+                          timeSinceLastDetection >= maxTrackingTimeMs || 
                           trackingConfidence < minTrackingConfidence
         
         val detection = if (shouldDetect) {
@@ -140,6 +144,7 @@ class ObjectTracker(
                 // Нашли хороший объект - начинаем трекинг
                 isTracking = true
                 framesSinceDetection = 0
+                lastDetectionTime = currentTime
                 kalman.reset()
                 lastDetection = detected
                 trackingConfidence = 1.0f
@@ -149,6 +154,7 @@ class ObjectTracker(
                 isTracking = false
                 lastDetection = null
                 trackingConfidence = 0f
+                lastDetectionTime = 0L
                 kalman.reset()  // Сбрасываем фильтр при потере объекта
                 null
             }
