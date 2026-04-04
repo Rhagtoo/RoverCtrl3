@@ -191,9 +191,17 @@ class ObjectTracker(
         // Вычисляем управление
         var targetCx = finalDetection.cx
         var targetCy = finalDetection.cy
+        
+        // ИНВЕРСИЯ TILT: YOLO координаты (0=верх, 1=низ) нужно инвертировать для управления
+        // Объект вверху кадра (cy≈0) → нужно наклонять вниз (положительный tilt)
+        // Объект внизу кадра (cy≈1) → нужно наклонять вверх (отрицательный tilt)
+        targetCy = 1.0f - targetCy
+        
         // Для cat смещаем цель к нижней части рамки (под ноги)
+        // Уже после инверсии: targetCy=0 → низ кадра, targetCy=1 → верх кадра
+        // Поэтому добавляем h/2 чтобы сместить ВНИЗ по кадру (уменьшаем targetCy)
         if (finalDetection.label == "cat") {
-            targetCy = (finalDetection.cy + finalDetection.h / 2).coerceAtMost(1.0f)
+            targetCy = (targetCy - finalDetection.h / 2).coerceAtLeast(0f)
         }
 
         val errX = targetCx - 0.5f
