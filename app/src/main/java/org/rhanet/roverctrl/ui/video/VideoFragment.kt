@@ -98,10 +98,35 @@ class VideoFragment : Fragment() {
     @Volatile private var swapped = false  // FIX: volatile для thread safety
     private var laserTracker:  LaserTracker?  = null
     private var objectTracker: ObjectTracker? = null
-    private var objectSmoother: SmoothingFilter? = null
-    private var laserSmoother:  SmoothingFilter? = null
+    
+    // Простейшее сглаживание координат
+    private var lastObjectDetection: DetectionResult? = null
+    private var lastLaserDetection: DetectionResult? = null
+    private const val SMOOTHING_ALPHA = 0.7f  // 0.7*new + 0.3*old
+    private const val MIN_CONFIDENCE = 0.3f
 
     private fun trackingOverlay(): TrackingOverlayView = if (swapped) overlayXiao else overlay
+    
+    // Простая функция сглаживания
+    private fun smoothDetection(newDetection: DetectionResult?, lastDetection: DetectionResult?): DetectionResult? {
+        if (newDetection == null || newDetection.confidence < MIN_CONFIDENCE) {
+            return lastDetection?.copy(confidence = lastDetection.confidence * 0.8f)
+        }
+        
+        return if (lastDetection != null) {
+            lastDetection.copy(
+                cx = SMOOTHING_ALPHA * newDetection.cx + (1 - SMOOTHING_ALPHA) * lastDetection.cx,
+                cy = SMOOTHING_ALPHA * newDetection.cy + (1 - SMOOTHING_ALPHA) * lastDetection.cy,
+                w = SMOOTHING_ALPHA * newDetection.w + (1 - SMOOTHING_ALPHA) * lastDetection.w,
+                h = SMOOTHING_ALPHA * newDetection.h + (1 - SMOOTHING_ALPHA) * lastDetection.h,
+                confidence = maxOf(newDetection.confidence, lastDetection.confidence * 0.95f),
+                label = newDetection.label
+            )
+        } else {
+            newDetection
+        }
+    }
+    
     private var cameraProvider: ProcessCameraProvider? = null
     private var xiaoAnalysisJob: Job? = null
 
@@ -445,7 +470,7 @@ class VideoFragment : Fragment() {
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setTargetResolution(Size(320, 240))
             Camera2Interop.Extender(ab).setCaptureRequestOption(
-                android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(60, 120))
+                android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(10, 15))  // FIX: 10-15 FPS для CV
             val analysis = ab.build()
             analysis.setAnalyzer(analysisExecutor, ::processFrame)
 
@@ -456,7 +481,7 @@ class VideoFragment : Fragment() {
                     Camera2CameraControl.from(cam.cameraControl).addCaptureRequestOptions(
                         CaptureRequestOptions.Builder().setCaptureRequestOption(
                             android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-                            Range(60, 120)).build())
+                            Range(10, 15)).build())  // FIX: 10-15 FPS для CV
                 } catch (_: Throwable) {}
             } catch (e: Exception) {
                 Log.e(TAG, "Camera fallback", e)
@@ -465,6 +490,8 @@ class VideoFragment : Fragment() {
                 val fa = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .setTargetResolution(Size(320, 240)).build()
+                Camera2Interop.Extender(fa).setCaptureRequestOption(
+                    android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(10, 15))  // FIX: 10-15 FPS
                 fa.setAnalyzer(analysisExecutor, ::processFrame)
                 prov.bindToLifecycle(viewLifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, fp, fa)
             }
