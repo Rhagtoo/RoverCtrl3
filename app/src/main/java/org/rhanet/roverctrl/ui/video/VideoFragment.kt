@@ -178,6 +178,18 @@ class VideoFragment : Fragment() {
                 updateXiaoAnalysis()
             }
         }
+        
+        // Observe sensitivity changes
+        viewLifecycleOwner.lifecycleScope.launch {
+            vm.sensitivity.collectLatest { settings ->
+                // Update ObjectTracker sensitivity if it exists and YOLO mode is active
+                if (objectTracker != null && vm.trackMode.value == TrackingMode.OBJECT_TRACK) {
+                    objectTracker?.updateSensitivity(settings.camPanSens, settings.camTiltSens)
+                    Log.d(TAG, "YOLO sensitivity updated: pan=${settings.camPanSens}, tilt=${settings.camTiltSens}")
+                }
+                // TODO: Add sensitivity support for LaserTracker
+            }
+        }
 
         if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA)
             == PackageManager.PERMISSION_GRANTED) startCamera()
@@ -584,12 +596,21 @@ class VideoFragment : Fragment() {
             TrackingMode.OBJECT_TRACK -> {
                 if (objectTracker == null) {
                     try {
-                        objectTracker = ObjectTracker(requireContext())
+                        val settings = vm.sensitivity.value
+                        objectTracker = ObjectTracker(
+                            context = requireContext(),
+                            panSensitivity = settings.camPanSens,
+                            tiltSensitivity = settings.camTiltSens
+                        )
                     } catch (e: Throwable) {
                         Toast.makeText(requireContext(), "YOLO: ${e.message}", Toast.LENGTH_LONG).show()
                         vm.setTrackMode(TrackingMode.MANUAL)
                         spinnerMode.setSelection(0)
                     }
+                } else {
+                    // Update sensitivity if tracker already exists
+                    val settings = vm.sensitivity.value
+                    objectTracker?.updateSensitivity(settings.camPanSens, settings.camTiltSens)
                 }
             }
         }

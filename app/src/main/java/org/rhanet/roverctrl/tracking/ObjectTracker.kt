@@ -33,13 +33,15 @@ class ObjectTracker(
     private val targetClass: Int = -1,
     private val confThresh:  Float = 0.25f,
     private val iouThresh:   Float = 0.45f,
-    useGpu:           Boolean = true
+    useGpu:           Boolean = true,
+    private var panSensitivity:  Float = 1.0f,
+    private var tiltSensitivity: Float = 1.0f
 ) {
     private var isTracking = false
     private var framesSinceDetection = 0
     private val maxTrackingTimeMs = 1000L
     private var lastDetectionTime = 0L
-    private val kalman = KalmanFilter2D()
+    private val kalman = SimpleKalmanFilter()
     private var lastDetection: DetectionResult? = null
     private var trackingConfidence = 0f
 
@@ -195,8 +197,12 @@ class ObjectTracker(
 
         val errX = targetCx - 0.5f
         val errY = targetCy - 0.5f
-        val pan  = pidPan.updateWithDeadband(errX)
-        val tilt = pidTilt.updateWithDeadband(errY)
+        val panRaw  = pidPan.updateWithDeadband(errX)
+        val tiltRaw = pidTilt.updateWithDeadband(errY)
+        
+        // Apply sensitivity multipliers
+        val pan  = (panRaw * panSensitivity).toInt().coerceIn(-100, 100)
+        val tilt = (tiltRaw * tiltSensitivity).toInt().coerceIn(-100, 100)
 
         val mode = if (shouldDetect) "DETECT" else "TRACK"
         Log.d(TAG, "[$mode] ${finalDetection.label} ${(finalDetection.confidence*100).toInt()}% " +
@@ -331,6 +337,12 @@ class ObjectTracker(
     fun updatePidGains(kpPan: Float, kpTilt: Float) {
         pidPan.kp = kpPan; pidTilt.kp = kpTilt
         pidPan.reset(); pidTilt.reset()
+    }
+
+    fun updateSensitivity(panSens: Float, tiltSens: Float) {
+        panSensitivity = panSens
+        tiltSensitivity = tiltSens
+        Log.d(TAG, "Sensitivity updated: pan=$panSens, tilt=$tiltSens")
     }
 
     fun close() = interp.close()

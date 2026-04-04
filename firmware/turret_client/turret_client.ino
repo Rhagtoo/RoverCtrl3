@@ -451,6 +451,19 @@ void setup() {
     ArduinoOTA.begin();
 
     // HTTP OTA /update on port 80
+    otaServer.on("/", HTTP_GET, []() {
+        otaServer.send(200, "text/plain", "XIAO Turret v2.6\n/update - OTA\n/status - JSON status");
+    });
+    
+    otaServer.on("/status", HTTP_GET, []() {
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+            "{\"tilt\":%.1f,\"tiltTarget\":%.1f,\"tiltPwm\":%d,\"pan\":%d,\"neutral\":%d,\"maxSpeed\":%d,\"dpsUp\":%.1f,\"dpsDn\":%.1f,\"deadband\":%.1f,\"driftCorr\":%.1f}",
+            virtualTiltAngle, tiltTargetAngle, currentTiltPwm, currentPan,
+            tiltNeutral, tiltMaxSpeed, tiltDpsUp, tiltDpsDn, tiltDeadband, tiltDriftCorr);
+        otaServer.send(200, "application/json", buf);
+    });
+    
     otaServer.on("/update", HTTP_POST,
         []() {
             otaServer.send(200, "text/plain", Update.hasError() ? "FAIL" : "OK");

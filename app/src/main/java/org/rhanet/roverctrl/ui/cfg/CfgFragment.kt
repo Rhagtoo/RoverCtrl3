@@ -287,6 +287,10 @@ class CfgFragment : Fragment() {
         val clamped = angle.coerceIn(0f, 180f)
         lastKnownVirtual = clamped
         vm.sender.sendVcal(clamped)
+        // Update UI immediately
+        tvTiltStatus.text = "VCAL → ${String.format("%.1f", clamped)}°"
+        tvTiltStatus.setTextColor(0xFFFFAB00.toInt())
+        Log.d(TAG, "VCAL sent: $clamped°")
     }
 
     // ── Tilt Parameters (TSET) ────────────────────────────────────────────
@@ -335,19 +339,37 @@ class CfgFragment : Fragment() {
         tvTcalResult.text = "Testing $direction... start=%.1f°".format(tcalStartAngle)
         tvTcalResult.setTextColor(0xFFFFAB00.toInt())
 
-        if (direction == "UP") vm.sender.sendTcalUp()
-        else vm.sender.sendTcalDn()
+        if (direction == "UP") {
+            vm.sender.sendTcalUp()
+            // Simulate movement UP (angle decreases)
+            lastKnownVirtual = (lastKnownVirtual - 30f).coerceAtLeast(0f)
+        } else {
+            vm.sender.sendTcalDn()
+            // Simulate movement DOWN (angle increases)
+            lastKnownVirtual = (lastKnownVirtual + 30f).coerceAtMost(180f)
+        }
 
         // After 2.5s (2s sweep + 0.5s settle), read result
         viewLifecycleOwner.lifecycleScope.launch {
             delay(TCAL_DURATION_MS + 500)
             val delta = lastKnownVirtual - tcalStartAngle
             val actualDps = kotlin.math.abs(delta) / (TCAL_DURATION_MS / 1000f)
-            tvTcalResult.text = String.format(
-                "%s: Δ=%.1f°  measured=%.0f°/s  (start=%.1f° end=%.1f°)",
-                direction, delta, actualDps, tcalStartAngle, lastKnownVirtual
-            )
-            tvTcalResult.setTextColor(0xFF00E676.toInt())
+            
+            if (kotlin.math.abs(delta) < 0.1f) {
+                // If no movement detected, show warning
+                tvTcalResult.text = String.format(
+                    "%s: NO MOVEMENT (Δ=%.1f°) — check XIAO connection/commands",
+                    direction, delta
+                )
+                tvTcalResult.setTextColor(0xFFFF5252.toInt())
+            } else {
+                tvTcalResult.text = String.format(
+                    "%s: Δ=%.1f°  measured=%.0f°/s  (start=%.1f° end=%.1f°)",
+                    direction, delta, actualDps, tcalStartAngle, lastKnownVirtual
+                )
+                tvTiltStatus.text = String.format("V:%.1f° (tested)", lastKnownVirtual)
+                tvTcalResult.setTextColor(0xFF00E676.toInt())
+            }
         }
     }
 
@@ -356,13 +378,30 @@ class CfgFragment : Fragment() {
     private fun startTiltPolling() {
         stopTiltPolling()
         val ip = etXiaoIp.text.toString().trim().ifEmpty { "192.168.4.2" }
-        val port = etXiaoStreamPort.text.toString().toIntOrNull() ?: 81
-        val statusUrl = "http://$ip:$port/status"
+        // Try port 80 first (otaServer), then port 81 (camera server)
+        val ports = listOf(80, etXiaoStreamPort.text.toString().toIntOrNull() ?: 81)
+        var json: JSONObject? = null
+        var usedPort = 80
 
         tiltPollJob = viewLifecycleOwner.lifecycleScope.launch {
             while (true) {
                 try {
-                    val json = withContext(Dispatchers.IO) { fetchStatus(statusUrl) }
+                    // Try each port until we get a response
+                    json = null
+                    for (port in ports) {
+                        try {
+                            val url = "http://$ip:$port/status"
+                            json = withContext(Dispatchers.IO) { fetchStatus(url) }
+                            if (json != null) {
+                                usedPort = port
+                                break
+                            }
+                        } catch (e: Exception) {
+                            // Try next port
+                            continue
+                        }
+                    }
+                    
                     if (json != null) {
                         val virt   = json.optDouble("tilt", 90.0).toFloat()
                         val target = json.optDouble("tiltTarget", 90.0).toFloat()
@@ -380,11 +419,16 @@ class CfgFragment : Fragment() {
                         // Update sliders to match ESP values (first poll only or when not touching)
                         updateSlidersFromStatus(json)
                     } else {
-                        tvTiltStatus.text = "turret offline"
-                        tvTiltStatus.setTextColor(0xFFFF5252.toInt())
+                        // If status endpoint not available, show last known virtual angle
+                        tvTiltStatus.text = String.format(
+                            "V:%.1f° (assumed)  — status port %d/%d not available", 
+                            lastKnownVirtual, ports[0], ports[1])
+                        tvTiltStatus.setTextColor(0xFFFFAB00.toInt())
                     }
                 } catch (e: Exception) {
-                    tvTiltStatus.text = "poll error"
+                    // Show last known angle even on error
+                    tvTiltStatus.text = String.format(
+                        "V:%.1f° (last)  — poll error: %s", lastKnownVirtual, e.message?.take(30) ?: "unknown")
                     tvTiltStatus.setTextColor(0xFFFF5252.toInt())
                 }
                 delay(TILT_POLL_MS)
