@@ -39,6 +39,7 @@ class CfgFragment : Fragment() {
     companion object {
         private const val TAG = "CfgFragment"
         private const val TILT_POLL_MS = 500L
+        private const val TCAL_DURATION_MS = 2000L
     }
 
     private val vm: RoverViewModel by activityViewModels()
@@ -75,15 +76,33 @@ class CfgFragment : Fragment() {
     private lateinit var tvCamPanVal:     TextView
     private lateinit var tvCamTiltVal:    TextView
 
-    // Tilt calibration
+    // Tilt calibration (VCAL)
     private lateinit var tvTiltStatus: TextView
     private lateinit var btnTiltM5:    Button
     private lateinit var btnTiltM1:    Button
     private lateinit var btnTiltReset: Button
     private lateinit var btnTiltP1:    Button
     private lateinit var btnTiltP5:    Button
+
+    // Tilt parameters (TSET)
+    private lateinit var sbTpNeutral:    SeekBar
+    private lateinit var sbTpSpeed:      SeekBar
+    private lateinit var sbTpDpsUp:      SeekBar
+    private lateinit var sbTpDpsDn:      SeekBar
+    private lateinit var sbTpDeadband:   SeekBar
+    private lateinit var tvTpNeutralVal: TextView
+    private lateinit var tvTpSpeedVal:   TextView
+    private lateinit var tvTpDpsUpVal:   TextView
+    private lateinit var tvTpDpsDnVal:   TextView
+    private lateinit var tvTpDeadbandVal:TextView
+    private lateinit var btnTcalUp:      Button
+    private lateinit var btnTcalDn:      Button
+    private lateinit var btnTpSave:      Button
+    private lateinit var tvTcalResult:   TextView
+
     private var tiltPollJob: Job? = null
     private var lastKnownVirtual: Float = 90f
+    private var tcalStartAngle: Float = 0f   // for measuring test sweep delta
 
     private var selectedBinUri: Uri? = null
 
@@ -133,7 +152,7 @@ class CfgFragment : Fragment() {
         tvCamPanVal     = view.findViewById(R.id.tv_cam_pan_val)
         tvCamTiltVal    = view.findViewById(R.id.tv_cam_tilt_val)
 
-        // Tilt calibration
+        // Tilt calibration (VCAL)
         tvTiltStatus = view.findViewById(R.id.tv_tilt_status)
         btnTiltM5    = view.findViewById(R.id.btn_tilt_m5)
         btnTiltM1    = view.findViewById(R.id.btn_tilt_m1)
@@ -141,11 +160,28 @@ class CfgFragment : Fragment() {
         btnTiltP1    = view.findViewById(R.id.btn_tilt_p1)
         btnTiltP5    = view.findViewById(R.id.btn_tilt_p5)
 
+        // Tilt parameters (TSET)
+        sbTpNeutral     = view.findViewById(R.id.sb_tp_neutral)
+        sbTpSpeed       = view.findViewById(R.id.sb_tp_speed)
+        sbTpDpsUp       = view.findViewById(R.id.sb_tp_dps_up)
+        sbTpDpsDn       = view.findViewById(R.id.sb_tp_dps_dn)
+        sbTpDeadband    = view.findViewById(R.id.sb_tp_deadband)
+        tvTpNeutralVal  = view.findViewById(R.id.tv_tp_neutral_val)
+        tvTpSpeedVal    = view.findViewById(R.id.tv_tp_speed_val)
+        tvTpDpsUpVal    = view.findViewById(R.id.tv_tp_dps_up_val)
+        tvTpDpsDnVal    = view.findViewById(R.id.tv_tp_dps_dn_val)
+        tvTpDeadbandVal = view.findViewById(R.id.tv_tp_deadband_val)
+        btnTcalUp       = view.findViewById(R.id.btn_tcal_up)
+        btnTcalDn       = view.findViewById(R.id.btn_tcal_dn)
+        btnTpSave       = view.findViewById(R.id.btn_tp_save)
+        tvTcalResult    = view.findViewById(R.id.tv_tcal_result)
+
         loadSavedConfig()
         loadSensitivity()
         setupOta()
         setupSensitivitySliders()
         setupTiltCalibration()
+        setupTiltParameters()
 
         btnConnect.setOnClickListener {
             if (vm.connected.value) disconnect() else connect()
@@ -195,12 +231,10 @@ class CfgFragment : Fragment() {
             Toast.makeText(requireContext(), "Invalid configuration", Toast.LENGTH_SHORT).show()
             return
         }
-
         if (!config.isValid()) {
             Toast.makeText(requireContext(), "Invalid IP or port values", Toast.LENGTH_SHORT).show()
             return
         }
-
         ConnectionConfig.save(requireContext(), config)
         vm.connect(config, requireContext())
         Toast.makeText(requireContext(), "Connecting...", Toast.LENGTH_SHORT).show()
@@ -239,7 +273,7 @@ class CfgFragment : Fragment() {
         btnReset.isEnabled         = enabled
     }
 
-    // ── Tilt Calibration ──────────────────────────────────────────────────
+    // ── Tilt Calibration (VCAL) ───────────────────────────────────────────
 
     private fun setupTiltCalibration() {
         btnTiltM5.setOnClickListener    { sendVcal(lastKnownVirtual - 5f) }
@@ -254,6 +288,70 @@ class CfgFragment : Fragment() {
         lastKnownVirtual = clamped
         vm.sender.sendVcal(clamped)
     }
+
+    // ── Tilt Parameters (TSET) ────────────────────────────────────────────
+
+    private fun setupTiltParameters() {
+        // Slider listeners — send TSET on change
+        fun sbListener(tv: TextView, paramSender: (Int) -> Unit) =
+            object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
+                    tv.text = progress.toString()
+                    if (fromUser) paramSender(progress)
+                }
+                override fun onStartTrackingTouch(sb: SeekBar) {}
+                override fun onStopTrackingTouch(sb: SeekBar) {}
+            }
+
+        sbTpNeutral.setOnSeekBarChangeListener(sbListener(tvTpNeutralVal) {
+            vm.sender.sendTset(neutral = it)
+        })
+        sbTpSpeed.setOnSeekBarChangeListener(sbListener(tvTpSpeedVal) {
+            vm.sender.sendTset(maxSpeed = it)
+        })
+        sbTpDpsUp.setOnSeekBarChangeListener(sbListener(tvTpDpsUpVal) {
+            vm.sender.sendTset(dpsUp = it.toFloat())
+        })
+        sbTpDpsDn.setOnSeekBarChangeListener(sbListener(tvTpDpsDnVal) {
+            vm.sender.sendTset(dpsDn = it.toFloat())
+        })
+        sbTpDeadband.setOnSeekBarChangeListener(sbListener(tvTpDeadbandVal) {
+            vm.sender.sendTset(deadband = it.toFloat())
+        })
+
+        // Test sweep buttons
+        btnTcalUp.setOnClickListener { startTcal("UP") }
+        btnTcalDn.setOnClickListener { startTcal("DN") }
+
+        // Save to ESP NVS
+        btnTpSave.setOnClickListener {
+            vm.sender.sendTsave()
+            Toast.makeText(requireContext(), "Saved to ESP NVS", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun startTcal(direction: String) {
+        tcalStartAngle = lastKnownVirtual
+        tvTcalResult.text = "Testing $direction... start=%.1f°".format(tcalStartAngle)
+        tvTcalResult.setTextColor(0xFFFFAB00.toInt())
+
+        if (direction == "UP") vm.sender.sendTcalUp()
+        else vm.sender.sendTcalDn()
+
+        // After 2.5s (2s sweep + 0.5s settle), read result
+        viewLifecycleOwner.lifecycleScope.launch {
+            delay(TCAL_DURATION_MS + 500)
+            val delta = lastKnownVirtual - tcalStartAngle
+            val actualDps = kotlin.math.abs(delta) / (TCAL_DURATION_MS / 1000f)
+            tvTcalResult.text = String.format(
+                "%s: Δ=%.1f°  measured=%.0f°/s  (start=%.1f° end=%.1f°)",
+                direction, delta, actualDps, tcalStartAngle, lastKnownVirtual
+            )
+            tvTcalResult.setTextColor(0xFF00E676.toInt())
+        }
+    }
+
+    // ── Tilt Status Polling ───────────────────────────────────────────────
 
     private fun startTiltPolling() {
         stopTiltPolling()
@@ -278,6 +376,9 @@ class CfgFragment : Fragment() {
                             if (kotlin.math.abs(virt - target) < 3f) 0xFF00E676.toInt()
                             else 0xFFFFAB00.toInt()
                         )
+
+                        // Update sliders to match ESP values (first poll only or when not touching)
+                        updateSlidersFromStatus(json)
                     } else {
                         tvTiltStatus.text = "turret offline"
                         tvTiltStatus.setTextColor(0xFFFF5252.toInt())
@@ -291,9 +392,31 @@ class CfgFragment : Fragment() {
         }
     }
 
+    private var slidersInitialized = false
+
+    private fun updateSlidersFromStatus(json: JSONObject) {
+        if (slidersInitialized) return  // only set once from ESP
+        if (!json.has("neutral")) return  // old firmware without params
+
+        sbTpNeutral.progress  = json.optInt("neutral", 90)
+        sbTpSpeed.progress    = json.optInt("maxSpeed", 60)
+        sbTpDpsUp.progress    = json.optDouble("dpsUp", 70.0).toInt()
+        sbTpDpsDn.progress    = json.optDouble("dpsDn", 90.0).toInt()
+        sbTpDeadband.progress = json.optDouble("deadband", 5.0).toInt()
+
+        tvTpNeutralVal.text   = sbTpNeutral.progress.toString()
+        tvTpSpeedVal.text     = sbTpSpeed.progress.toString()
+        tvTpDpsUpVal.text     = sbTpDpsUp.progress.toString()
+        tvTpDpsDnVal.text     = sbTpDpsDn.progress.toString()
+        tvTpDeadbandVal.text  = sbTpDeadband.progress.toString()
+
+        slidersInitialized = true
+    }
+
     private fun stopTiltPolling() {
         tiltPollJob?.cancel()
         tiltPollJob = null
+        slidersInitialized = false
     }
 
     private fun fetchStatus(url: String): JSONObject? {
@@ -320,17 +443,13 @@ class CfgFragment : Fragment() {
     // ── OTA ───────────────────────────────────────────────────────────────
 
     private fun setupOta() {
-        btnSelectBin.setOnClickListener {
-            filePicker.launch("*/*")
-        }
-
+        btnSelectBin.setOnClickListener { filePicker.launch("*/*") }
         btnOtaUpload.setOnClickListener {
             val uri = selectedBinUri ?: return@setOnClickListener
-            val ip = if (rbOtaRover.isChecked) {
+            val ip = if (rbOtaRover.isChecked)
                 etRoverIp.text.toString().trim().ifEmpty { "192.168.4.1" }
-            } else {
+            else
                 etXiaoIp.text.toString().trim().ifEmpty { "192.168.4.2" }
-            }
             startOtaUpload(ip, uri)
         }
     }
@@ -355,7 +474,6 @@ class CfgFragment : Fragment() {
                     }
                 }
             )
-
             result.onSuccess {
                 pbOta.progress = 100
                 tvOtaStatus.text = "Done! Device is rebooting..."
@@ -370,7 +488,6 @@ class CfgFragment : Fragment() {
                 Toast.makeText(requireContext(), "OTA failed: ${e.message}", Toast.LENGTH_LONG).show()
                 btnOtaUpload.isEnabled = true
             }
-
             btnSelectBin.isEnabled = true
         }
     }
