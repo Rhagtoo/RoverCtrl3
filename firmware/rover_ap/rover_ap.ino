@@ -23,8 +23,8 @@ const IPAddress AP_SUBNET(255, 255, 255, 0);
 #define PWM_RIGHT 5
 #define ENC_L_A 12
 #define ENC_L_B 11
-#define ENC_R_A 38
-#define ENC_R_B 37
+#define ENC_R_A 15
+#define ENC_R_B 16
 #define SERVO_STEER 13
 #define LASER_PIN   17
 #define CMD_PORT           4210

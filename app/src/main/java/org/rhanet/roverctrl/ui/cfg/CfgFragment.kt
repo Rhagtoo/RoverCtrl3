@@ -378,36 +378,20 @@ class CfgFragment : Fragment() {
     private fun startTiltPolling() {
         stopTiltPolling()
         val ip = etXiaoIp.text.toString().trim().ifEmpty { "192.168.4.2" }
-        // Try port 80 first (otaServer), then port 81 (camera server)
-        val ports = listOf(80, etXiaoStreamPort.text.toString().toIntOrNull() ?: 81)
-        var json: JSONObject? = null
-        var usedPort = 80
+        // v2.7: /status only on stream port (81, async esp_httpd)
+        val port = etXiaoStreamPort.text.toString().toIntOrNull() ?: 81
+        val statusUrl = "http://$ip:$port/status"
 
         tiltPollJob = viewLifecycleOwner.lifecycleScope.launch {
             while (true) {
                 try {
-                    // Try each port until we get a response
-                    json = null
-                    for (port in ports) {
-                        try {
-                            val url = "http://$ip:$port/status"
-                            json = withContext(Dispatchers.IO) { fetchStatus(url) }
-                            if (json != null) {
-                                usedPort = port
-                                break
-                            }
-                        } catch (e: Exception) {
-                            // Try next port
-                            continue
-                        }
-                    }
-                    
-                    val localJson = json  // Create local immutable copy
-                    if (localJson != null) {
-                        val virt   = localJson.optDouble("tilt", 90.0).toFloat()
-                        val target = localJson.optDouble("tiltTarget", 90.0).toFloat()
-                        val pwm    = localJson.optInt("tiltPwm", 90)
-                        val pan    = localJson.optInt("pan", 90)
+                    val json = withContext(Dispatchers.IO) { fetchStatus(statusUrl) }
+
+                    if (json != null) {
+                        val virt   = json.optDouble("tilt", 90.0).toFloat()
+                        val target = json.optDouble("tiltTarget", 90.0).toFloat()
+                        val pwm    = json.optInt("tiltPwm", 90)
+                        val pan    = json.optInt("pan", 90)
                         lastKnownVirtual = virt
 
                         tvTiltStatus.text = String.format(
@@ -417,17 +401,14 @@ class CfgFragment : Fragment() {
                             else 0xFFFFAB00.toInt()
                         )
 
-                        // Update sliders to match ESP values (first poll only or when not touching)
-                        updateSlidersFromStatus(localJson)
+                        updateSlidersFromStatus(json)
                     } else {
-                        // If status endpoint not available, show last known virtual angle
                         tvTiltStatus.text = String.format(
-                            "V:%.1f° (assumed)  — status port %d/%d not available", 
-                            lastKnownVirtual, ports[0], ports[1])
+                            "V:%.1f° (assumed)  — /status not available",
+                            lastKnownVirtual)
                         tvTiltStatus.setTextColor(0xFFFFAB00.toInt())
                     }
                 } catch (e: Exception) {
-                    // Show last known angle even on error
                     tvTiltStatus.text = String.format(
                         "V:%.1f° (last)  — poll error: %s", lastKnownVirtual, e.message?.take(30) ?: "unknown")
                     tvTiltStatus.setTextColor(0xFFFF5252.toInt())
@@ -491,15 +472,21 @@ class CfgFragment : Fragment() {
         btnSelectBin.setOnClickListener { filePicker.launch("*/*") }
         btnOtaUpload.setOnClickListener {
             val uri = selectedBinUri ?: return@setOnClickListener
-            val ip = if (rbOtaRover.isChecked)
+            val isRover = rbOtaRover.isChecked
+            val ip = if (isRover)
                 etRoverIp.text.toString().trim().ifEmpty { "192.168.4.1" }
             else
                 etXiaoIp.text.toString().trim().ifEmpty { "192.168.4.2" }
-            startOtaUpload(ip, uri)
+            // Rover: multipart on port 80 (Arduino WebServer)
+            // Turret v2.7+: raw binary on stream port (esp_httpd)
+            val port = if (isRover) 80
+                       else etXiaoStreamPort.text.toString().toIntOrNull() ?: 81
+            val rawBinary = !isRover
+            startOtaUpload(ip, port, rawBinary, uri)
         }
     }
 
-    private fun startOtaUpload(ip: String, uri: Uri) {
+    private fun startOtaUpload(ip: String, port: Int, rawBinary: Boolean, uri: Uri) {
         btnOtaUpload.isEnabled = false
         btnSelectBin.isEnabled = false
         pbOta.visibility = View.VISIBLE
@@ -510,6 +497,8 @@ class CfgFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             val result = OtaUploader.upload(
                 deviceIp   = ip,
+                port       = port,
+                rawBinary  = rawBinary,
                 binUri     = uri,
                 context    = requireContext(),
                 onProgress = { pct ->

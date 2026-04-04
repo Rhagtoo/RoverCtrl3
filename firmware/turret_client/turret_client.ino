@@ -1,16 +1,20 @@
 /**
- * turret_client.ino v2.6
+ * turret_client.ino v2.7
  *
- * Changes from v2.5:
- *   FIX: swap UP/DN speed mapping — angle increasing = camera DOWN = faster (DN)
- *   ADD: TSET command — runtime-tunable tilt parameters via UDP
- *   ADD: TSAVE command — persist tilt params to NVS (Preferences)
- *   ADD: TCAL:UP / TCAL:DN — timed test sweep (2s) for speed calibration
- *   ADD: /status now includes all tilt config params
- *   ADD: Preferences load on boot
+ * Changes from v2.6:
+ *   PERF: camera HVGA (480×320) + quality 10 (was VGA + quality 6)
+ *   PERF: removed ArduinoOTA (mDNS overhead eliminated)
+ *   PERF: removed Arduino WebServer on port 80 (sync blocking eliminated)
+ *   PERF: all HTTP on single async esp_httpd (port 81)
+ *         /stream, /capture, /status, /update (GET=form, POST=raw binary)
+ *   FIX:  /status JSON was referencing undefined variables on port 80
+ *   PERF: loop() now only: checkWiFi + updateServos + delay(10)
  *
- * Virtual angle for CR tilt servo.
- * PAN: positional. TILT: CR + constant-speed positional controller.
+ * Kept from v2.6:
+ *   - CR tilt with virtual angle + NVS persistence
+ *   - TSET/TSAVE/TCAL/VCAL commands
+ *   - UDP control on Core 0
+ *   - Servo update ~100Hz on Core 1 (loop)
  *
  * Physical convention (confirmed):
  *   0°   = camera pointing UP
@@ -20,9 +24,7 @@
  */
 #include <WiFi.h>
 #include <WiFiUdp.h>
-#include <WebServer.h>
 #include <Update.h>
-#include <ArduinoOTA.h>
 #include <ESP32Servo.h>
 #include <Preferences.h>
 #include "esp_camera.h"
@@ -82,7 +84,6 @@ Preferences prefs;
 WiFiUDP udp;
 Servo servoPan, servoTilt;
 httpd_handle_t httpd = NULL;
-WebServer otaServer(80);
 
 int currentPan = 90;
 volatile bool panDirty = false;
@@ -140,18 +141,26 @@ bool setupCamera() {
     c.pin_vsync = VSYNC_GPIO_NUM; c.pin_href = HREF_GPIO_NUM;
     c.pin_sccb_sda = SIOD_GPIO_NUM; c.pin_sccb_scl = SIOC_GPIO_NUM;
     c.pin_pwdn = PWDN_GPIO_NUM; c.pin_reset = RESET_GPIO_NUM;
-    c.xclk_freq_hz = 20000000; c.pixel_format = PIXFORMAT_JPEG;
-    c.frame_size = FRAMESIZE_VGA; c.jpeg_quality = 6;
-    c.fb_count = 2; c.grab_mode = CAMERA_GRAB_LATEST;
+    c.xclk_freq_hz = 20000000;
+    c.pixel_format = PIXFORMAT_JPEG;
+    // ── v2.7: HVGA 480×320, quality 10 (was VGA 640×480, quality 6) ──
+    // HVGA is enough for YOLO (resized to 640×640 anyway)
+    // quality 10 is visually fine, ~2× smaller frames → faster WiFi transfer
+    c.frame_size   = FRAMESIZE_HVGA;   // 480×320
+    c.jpeg_quality = 10;               // 0-63, lower = better quality
+    c.fb_count     = 2;
+    c.grab_mode    = CAMERA_GRAB_LATEST;
     return esp_camera_init(&c) == ESP_OK;
 }
 
-// ═══ HTTP (port 81: stream, capture, status) ═══
+// ═══ HTTP handlers (all on port 81, async esp_httpd) ═══
+
 #define PART_BOUNDARY "123456789000000000000987654321"
 static const char* S_CT = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
 static const char* S_BD = "\r\n--" PART_BOUNDARY "\r\n";
 static const char* S_PT = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 
+// ── /stream — MJPEG ──
 esp_err_t stream_handler(httpd_req_t* r) {
     esp_err_t s = httpd_resp_set_type(r, S_CT);
     httpd_resp_set_hdr(r, "Access-Control-Allow-Origin", "*");
@@ -168,6 +177,7 @@ esp_err_t stream_handler(httpd_req_t* r) {
     return s;
 }
 
+// ── /capture — single JPEG ──
 esp_err_t capture_handler(httpd_req_t* r) {
     camera_fb_t* f = esp_camera_fb_get();
     if (!f) { httpd_resp_send_500(r); return ESP_FAIL; }
@@ -178,38 +188,174 @@ esp_err_t capture_handler(httpd_req_t* r) {
     return ESP_OK;
 }
 
+// ── /status — JSON telemetry ──
 esp_err_t status_handler(httpd_req_t* r) {
     char b[512];
     snprintf(b, sizeof(b),
         "{\"pan\":%d,\"tilt\":%.1f,\"tiltTarget\":%.1f,\"tiltPwm\":%d,"
         "\"neutral\":%d,\"maxSpeed\":%d,\"deadband\":%.1f,"
         "\"dpsUp\":%.0f,\"dpsDn\":%.0f,\"driftCorr\":%.0f,"
-        "\"tcalActive\":%s,\"heap\":%d,\"rssi\":%d}",
+        "\"tcalActive\":%s,\"heap\":%lu,\"rssi\":%d}",
         currentPan, virtualTiltAngle, tiltTargetAngle, currentTiltPwm,
         tiltCfg.neutral, tiltCfg.maxSpeed, tiltCfg.deadband,
         tiltCfg.dpsCamUp, tiltCfg.dpsCamDn, tiltCfg.driftCorr,
         tcalActive ? "true" : "false",
-        ESP.getFreeHeap(), WiFi.RSSI());
+        (unsigned long)ESP.getFreeHeap(), WiFi.RSSI());
     httpd_resp_set_type(r, "application/json");
     httpd_resp_set_hdr(r, "Access-Control-Allow-Origin", "*");
     httpd_resp_send(r, b, strlen(b));
     return ESP_OK;
 }
 
+// ── /update GET — HTML upload form ──
+static const char OTA_HTML[] PROGMEM = R"rawhtml(
+<!DOCTYPE html><html><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>Turret OTA</title>
+<style>
+body{font-family:monospace;margin:2em;background:#111;color:#0f0}
+button{background:#0f0;color:#111;border:none;padding:8px 24px;cursor:pointer;font-size:16px}
+#bar{width:100%;height:20px;background:#333;margin:8px 0;display:none}
+#fill{height:100%;width:0%;background:#0f0;transition:width 0.2s}
+</style></head><body>
+<h2>Turret OTA v2.7</h2>
+<input type='file' id='fw' accept='.bin'>
+<button onclick='upload()'>Flash</button>
+<div id='bar'><div id='fill'></div></div>
+<pre id='log'></pre>
+<script>
+async function upload(){
+  const f=document.getElementById('fw').files[0];
+  if(!f)return;
+  const log=document.getElementById('log');
+  const bar=document.getElementById('bar');
+  const fill=document.getElementById('fill');
+  bar.style.display='block';
+  log.textContent='Uploading '+f.name+' ('+f.size+' bytes)...\n';
+  try{
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST','/update');
+    xhr.setRequestHeader('Content-Type','application/octet-stream');
+    xhr.upload.onprogress=e=>{
+      if(e.lengthComputable){
+        const pct=Math.round(e.loaded/e.total*100);
+        fill.style.width=pct+'%';
+        log.textContent='Uploading... '+pct+'%\n';
+      }
+    };
+    xhr.onload=()=>{
+      log.textContent+=xhr.responseText+'\n';
+      if(xhr.status===200)log.textContent+='Rebooting in 1s...';
+    };
+    xhr.onerror=()=>log.textContent+='Upload failed!\n';
+    xhr.send(f);
+  }catch(e){log.textContent+='Error: '+e+'\n';}
+}
+</script></body></html>
+)rawhtml";
+
+esp_err_t update_get_handler(httpd_req_t* r) {
+    httpd_resp_set_type(r, "text/html");
+    httpd_resp_send(r, OTA_HTML, strlen(OTA_HTML));
+    return ESP_OK;
+}
+
+// ── /update POST — receive raw firmware binary ──
+esp_err_t update_post_handler(httpd_req_t* r) {
+    int remaining = r->content_len;
+    if (remaining <= 0) {
+        httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "No content");
+        return ESP_FAIL;
+    }
+
+    Serial.printf("OTA: receiving %d bytes\n", remaining);
+
+    if (!Update.begin(remaining)) {
+        Update.printError(Serial);
+        httpd_resp_send_err(r, HTTPD_500_INTERNAL_SERVER_ERROR, "Update.begin failed");
+        return ESP_FAIL;
+    }
+
+    char buf[1024];
+    int received = 0;
+    while (remaining > 0) {
+        int toRead = remaining < (int)sizeof(buf) ? remaining : (int)sizeof(buf);
+        int len = httpd_req_recv(r, buf, toRead);
+        if (len <= 0) {
+            if (len == HTTPD_SOCK_ERR_TIMEOUT) continue;  // retry on timeout
+            Update.abort();
+            Serial.println("OTA: receive error");
+            httpd_resp_send_err(r, HTTPD_500_INTERNAL_SERVER_ERROR, "Receive failed");
+            return ESP_FAIL;
+        }
+        if (Update.write((uint8_t*)buf, len) != (size_t)len) {
+            Update.abort();
+            Update.printError(Serial);
+            httpd_resp_send_err(r, HTTPD_500_INTERNAL_SERVER_ERROR, "Write failed");
+            return ESP_FAIL;
+        }
+        remaining -= len;
+        received += len;
+        if (received % 32768 == 0) {
+            Serial.printf("OTA: %d / %d\n", received, r->content_len);
+        }
+    }
+
+    if (Update.end(true)) {
+        Serial.printf("OTA OK: %d bytes\n", received);
+        httpd_resp_sendstr(r, "OK — Rebooting...");
+        delay(1000);
+        ESP.restart();
+        return ESP_OK;  // unreachable
+    }
+
+    Update.printError(Serial);
+    httpd_resp_send_err(r, HTTPD_500_INTERNAL_SERVER_ERROR, "Update.end failed");
+    return ESP_FAIL;
+}
+
+// ── / — root info page ──
+esp_err_t root_handler(httpd_req_t* r) {
+    char b[256];
+    snprintf(b, sizeof(b),
+        "XIAO Turret v2.7\n"
+        "Heap: %lu\n"
+        "Endpoints: /stream /capture /status /update\n",
+        (unsigned long)ESP.getFreeHeap());
+    httpd_resp_set_type(r, "text/plain");
+    httpd_resp_send(r, b, strlen(b));
+    return ESP_OK;
+}
+
+// ── Start HTTP server ──
 void startHttpServer() {
     httpd_config_t c = HTTPD_DEFAULT_CONFIG();
-    c.server_port = HTTP_PORT;
+    c.server_port   = HTTP_PORT;
+    c.max_uri_handlers = 8;
+    c.stack_size    = 8192;   // extra stack for OTA flash writes
+    c.recv_wait_timeout  = 30; // 30s timeout for OTA uploads
+    c.send_wait_timeout  = 10;
+
     if (httpd_start(&httpd, &c) == ESP_OK) {
-        httpd_uri_t u1 = { "/stream",  HTTP_GET, stream_handler,  NULL };
-        httpd_uri_t u2 = { "/capture", HTTP_GET, capture_handler, NULL };
-        httpd_uri_t u3 = { "/status",  HTTP_GET, status_handler,  NULL };
-        httpd_register_uri_handler(httpd, &u1);
-        httpd_register_uri_handler(httpd, &u2);
-        httpd_register_uri_handler(httpd, &u3);
+        httpd_uri_t u_root    = { "/",        HTTP_GET,  root_handler,        NULL };
+        httpd_uri_t u_stream  = { "/stream",  HTTP_GET,  stream_handler,      NULL };
+        httpd_uri_t u_capture = { "/capture", HTTP_GET,  capture_handler,     NULL };
+        httpd_uri_t u_status  = { "/status",  HTTP_GET,  status_handler,      NULL };
+        httpd_uri_t u_ota_get = { "/update",  HTTP_GET,  update_get_handler,  NULL };
+        httpd_uri_t u_ota_post= { "/update",  HTTP_POST, update_post_handler, NULL };
+        httpd_register_uri_handler(httpd, &u_root);
+        httpd_register_uri_handler(httpd, &u_stream);
+        httpd_register_uri_handler(httpd, &u_capture);
+        httpd_register_uri_handler(httpd, &u_status);
+        httpd_register_uri_handler(httpd, &u_ota_get);
+        httpd_register_uri_handler(httpd, &u_ota_post);
+        Serial.printf("HTTP server on port %d (6 handlers)\n", HTTP_PORT);
+    } else {
+        Serial.println("HTTP server FAILED");
     }
 }
 
-// ═══ Commands ═══
+// ═══ Commands (UDP) ═══
 void parseCommand(const char* cmd) {
     int pan = 0, tilt = 0;
     bool hp = false, ht = false;
@@ -246,9 +392,7 @@ void parseCommand(const char* cmd) {
         saveTiltConfig();
     }
 
-    // TCAL:UP — test sweep: move camera UP (angle decreasing) for 2s
-    // TCAL:DN — test sweep: move camera DOWN (angle increasing) for 2s
-    // TCAL:STOP — abort test sweep
+    // TCAL:UP / TCAL:DN / TCAL:STOP — timed test sweep for speed calibration
     if ((ptr = strstr(cmd, "TCAL:")) != NULL) {
         char dir[8];
         sscanf(ptr + 5, "%7s", dir);
@@ -320,8 +464,6 @@ void updateServos() {
             currentTiltPwm = pwm;
 
             // Open-loop integration with correct speed mapping
-            // tcalDirection > 0: angle increasing = camera DOWN = dpsCamDn
-            // tcalDirection < 0: angle decreasing = camera UP   = dpsCamUp
             float dps = (tcalDirection > 0) ? tiltCfg.dpsCamDn : tiltCfg.dpsCamUp;
             virtualTiltAngle += tcalDirection * dps * dt;
             virtualTiltAngle = constrain(virtualTiltAngle, TILT_MIN_ANGLE, TILT_MAX_ANGLE);
@@ -355,7 +497,6 @@ void updateServos() {
         // Open-loop integration with CORRECT speed mapping:
         //   speed > 0: angle INCREASING = camera moves DOWN = with gravity = FASTER (dpsCamDn)
         //   speed < 0: angle DECREASING = camera moves UP   = against gravity = SLOWER (dpsCamUp)
-        // FIX v2.6: was swapped in v2.5!
         float speedFrac = (float)speed / (float)tiltCfg.maxSpeed; // +1 or -1
         float dps = (speedFrac > 0) ? tiltCfg.dpsCamDn : tiltCfg.dpsCamUp;
         float actualDps = speedFrac * dps;
@@ -410,9 +551,10 @@ void udpTask(void* p) {
     }
 }
 
+// ═══ Setup & Loop ═══
 void setup() {
     Serial.begin(115200);
-    Serial.println("\n=== Turret v2.6 CR tilt + runtime calibration ===");
+    Serial.println("\n=== Turret v2.7 — lean & fast ===");
 
     // Load tilt config from NVS (or defaults)
     loadTiltConfig();
@@ -432,67 +574,24 @@ void setup() {
         tiltCfg.neutral, tiltCfg.maxSpeed, tiltCfg.dpsCamUp, tiltCfg.dpsCamDn);
 
     if (!setupCamera()) Serial.println("Camera FAIL");
-    else Serial.println("Camera OK");
+    else Serial.println("Camera OK (HVGA 480x320 q10)");
 
     connectWiFi();
     udp.begin(UDP_PORT);
     startHttpServer();
 
-    // ArduinoOTA
-    ArduinoOTA.setHostname("turret-client");
-    ArduinoOTA.onStart([]() { Serial.println("OTA Start"); });
-    ArduinoOTA.onEnd([]()   { Serial.println("\nOTA End"); });
-    ArduinoOTA.onProgress([](unsigned int done, unsigned int total) {
-        Serial.printf("OTA %u%%\r", done * 100 / total);
-    });
-    ArduinoOTA.onError([](ota_error_t e) {
-        Serial.printf("OTA Error[%u]\n", e);
-    });
-    ArduinoOTA.begin();
-
-    // HTTP OTA /update on port 80
-    otaServer.on("/", HTTP_GET, []() {
-        otaServer.send(200, "text/plain", "XIAO Turret v2.6\n/update - OTA\n/status - JSON status");
-    });
-    
-    otaServer.on("/status", HTTP_GET, []() {
-        char buf[256];
-        snprintf(buf, sizeof(buf),
-            "{\"tilt\":%.1f,\"tiltTarget\":%.1f,\"tiltPwm\":%d,\"pan\":%d,\"neutral\":%d,\"maxSpeed\":%d,\"dpsUp\":%.1f,\"dpsDn\":%.1f,\"deadband\":%.1f,\"driftCorr\":%.1f}",
-            virtualTiltAngle, tiltTargetAngle, currentTiltPwm, currentPan,
-            tiltNeutral, tiltMaxSpeed, tiltDpsUp, tiltDpsDn, tiltDeadband, tiltDriftCorr);
-        otaServer.send(200, "application/json", buf);
-    });
-    
-    otaServer.on("/update", HTTP_POST,
-        []() {
-            otaServer.send(200, "text/plain", Update.hasError() ? "FAIL" : "OK");
-            if (!Update.hasError()) { delay(500); ESP.restart(); }
-        },
-        []() {
-            HTTPUpload& upload = otaServer.upload();
-            if (upload.status == UPLOAD_FILE_START) {
-                Serial.printf("HTTP OTA: %s\n", upload.filename.c_str());
-                if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
-            } else if (upload.status == UPLOAD_FILE_WRITE) {
-                if (Update.write(upload.buf, upload.currentSize) != upload.currentSize)
-                    Update.printError(Serial);
-            } else if (upload.status == UPLOAD_FILE_END) {
-                if (Update.end(true)) Serial.printf("HTTP OTA OK: %u bytes\n", upload.totalSize);
-                else Update.printError(Serial);
-            }
-        }
-    );
-    otaServer.begin();
+    // v2.7: NO ArduinoOTA, NO Arduino WebServer
+    // OTA available via POST /update on port 81 (same async httpd)
+    // or browser: http://192.168.4.2:81/update
 
     xTaskCreatePinnedToCore(udpTask, "udp", 4096, NULL, 1, NULL, 0);
+    Serial.printf("Heap: %lu bytes free\n", (unsigned long)ESP.getFreeHeap());
     Serial.println("Ready!");
 }
 
 void loop() {
+    // v2.7: lean loop — no ArduinoOTA.handle(), no otaServer.handleClient()
     checkWiFi();
-    ArduinoOTA.handle();
-    otaServer.handleClient();
     updateServos();
     delay(10);
 }
