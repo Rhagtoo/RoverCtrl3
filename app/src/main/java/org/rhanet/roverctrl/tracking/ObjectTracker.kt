@@ -151,7 +151,7 @@ class ObjectTracker(
             }
         } else {
             lastDetection?.let {
-                val tracked = kalman.update(it)
+                val tracked = kalman.update(it, 0f)  // dt = 0 means use actual time
                 if (tracked.cx in 0f..1f && tracked.cy in 0f..1f &&
                     tracked.w in 0f..1f && tracked.h in 0f..1f) {
                     tracked
