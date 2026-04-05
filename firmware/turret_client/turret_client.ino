@@ -96,12 +96,16 @@ unsigned long lastReconnectAttempt = 0, lastCmdTime = 0;
 
 // ═══ TCAL test sweep state ═══
 bool  tcalActive = false;
-bool  tcalDone = false;          // true after sweep completes, until next TCAL
+bool  tcalDone = false;
+bool  calMode = false;            // calibration mode: ignores PAN/TILT commands
 int   tcalDirection = 0;
 float tcalStartAngle = 0.0f;
+float tcalEstimatedAngle = 0.0f;  // estimated angle during sweep (using current dps)
 unsigned long tcalStartMs = 0;
-unsigned long tcalDurationMs = 2000;
-unsigned long tcalElapsedMs = 0; // actual elapsed time of last sweep
+unsigned long tcalDurationMs = 500;    // v2.9: default 0.5s (was 2s)
+unsigned long tcalElapsedMs = 0;
+int   tcalSpeed = 20;             // separate safe speed for TCAL (default 20, NOT maxSpeed)
+#define TCAL_MAX_DEGREES 60.0f    // auto-stop if estimated travel exceeds this
 
 // ═══ NVS ═══
 void loadTiltConfig() {
@@ -198,20 +202,23 @@ esp_err_t capture_handler(httpd_req_t* r) {
 
 // ── /status — JSON telemetry ──
 esp_err_t status_handler(httpd_req_t* r) {
-    char b[640];
+    char b[768];
     snprintf(b, sizeof(b),
         "{\"pan\":%d,\"tilt\":%.1f,\"tiltTarget\":%.1f,\"tiltPwm\":%d,"
         "\"neutral\":%d,\"maxSpeed\":%d,\"deadband\":%.1f,"
         "\"dpsUp\":%.0f,\"dpsDn\":%.0f,\"driftCorr\":%.0f,"
-        "\"tcalActive\":%s,\"tcalDone\":%s,\"tcalElapsedMs\":%lu,\"tcalStartAngle\":%.1f,"
+        "\"calMode\":%s,\"tcalSpeed\":%d,"
+        "\"tcalActive\":%s,\"tcalDone\":%s,\"tcalElapsedMs\":%lu,"
+        "\"tcalStartAngle\":%.1f,\"tcalEstDeg\":%.1f,"
         "\"heap\":%lu,\"rssi\":%d}",
         currentPan, virtualTiltAngle, tiltTargetAngle, currentTiltPwm,
         tiltCfg.neutral, tiltCfg.maxSpeed, tiltCfg.deadband,
         tiltCfg.dpsCamUp, tiltCfg.dpsCamDn, tiltCfg.driftCorr,
+        calMode ? "true" : "false", tcalSpeed,
         tcalActive ? "true" : "false",
         tcalDone ? "true" : "false",
         (unsigned long)tcalElapsedMs,
-        tcalStartAngle,
+        tcalStartAngle, tcalEstimatedAngle,
         (unsigned long)ESP.getFreeHeap(), WiFi.RSSI());
     httpd_resp_set_type(r, "application/json");
     httpd_resp_set_hdr(r, "Access-Control-Allow-Origin", "*");
@@ -377,8 +384,7 @@ void parseCommand(const char* cmd) {
     if ((ptr = strstr(cmd, "TILT:")) != NULL)  { tilt = atoi(ptr + 5); ht = true; }
 
     // VCAL:<angle> — set virtual angle reference (calibration)
-    // Sets BOTH virtual and target to same value → error=0 → no movement
-    // Also forces servo to neutral to prevent any race conditions
+    // Enables calMode: ignores PAN/TILT until CEXIT
     if ((ptr = strstr(cmd, "VCAL:")) != NULL) {
         float cal = atof(ptr + 5);
         cal = constrain(cal, 0.0f, 180.0f);
@@ -386,11 +392,22 @@ void parseCommand(const char* cmd) {
         tiltTargetAngle = cal;
         servoTilt.write(tiltCfg.neutral);  // force stop
         currentTiltPwm = tiltCfg.neutral;
-        Serial.printf("VCAL: virtual=%.1f (servo stopped)\n", cal);
+        calMode = true;  // enter calibration mode
+        Serial.printf("VCAL: virtual=%.1f calMode=ON\n", cal);
+    }
+
+    // CEXIT — exit calibration mode, resume normal PAN/TILT control
+    if (strstr(cmd, "CEXIT") != NULL) {
+        calMode = false;
+        tcalActive = false;
+        servoTilt.write(tiltCfg.neutral);
+        currentTiltPwm = tiltCfg.neutral;
+        tiltTargetAngle = virtualTiltAngle;
+        Serial.printf("CEXIT: calMode=OFF virtual=%.1f\n", virtualTiltAngle);
     }
 
     // TSET:N:<neutral>;S:<maxSpeed>;U:<dpsUp>;D:<dpsDn>;DB:<deadband>;DC:<driftCorr>
-    // All fields optional — only updates what's present
+    // TS:<tcalSpeed> — set separate TCAL test speed
     if (strstr(cmd, "TSET:") != NULL) {
         if ((ptr = strstr(cmd, "N:")) != NULL)  tiltCfg.neutral   = constrain(atoi(ptr + 2), 70, 110);
         if ((ptr = strstr(cmd, "S:")) != NULL)  tiltCfg.maxSpeed  = constrain(atoi(ptr + 2), 10, 90);
@@ -398,9 +415,10 @@ void parseCommand(const char* cmd) {
         if ((ptr = strstr(cmd, "D:")) != NULL)  tiltCfg.dpsCamDn  = constrain(atof(ptr + 2), 10.0f, 200.0f);
         if ((ptr = strstr(cmd, "DB:")) != NULL) tiltCfg.deadband  = constrain(atof(ptr + 3), 1.0f, 20.0f);
         if ((ptr = strstr(cmd, "DC:")) != NULL) tiltCfg.driftCorr = constrain(atof(ptr + 3), 0.0f, 100.0f);
-        Serial.printf("TSET: N=%d S=%d U=%.0f D=%.0f DB=%.1f DC=%.0f\n",
+        if ((ptr = strstr(cmd, "TS:")) != NULL) tcalSpeed         = constrain(atoi(ptr + 3), 5, 60);
+        Serial.printf("TSET: N=%d S=%d U=%.0f D=%.0f DB=%.1f DC=%.0f TS=%d\n",
             tiltCfg.neutral, tiltCfg.maxSpeed, tiltCfg.dpsCamUp, tiltCfg.dpsCamDn,
-            tiltCfg.deadband, tiltCfg.driftCorr);
+            tiltCfg.deadband, tiltCfg.driftCorr, tcalSpeed);
     }
 
     // TSAVE — persist to NVS
@@ -408,33 +426,47 @@ void parseCommand(const char* cmd) {
         saveTiltConfig();
     }
 
-    // TCAL:UP / TCAL:DN / TCAL:STOP — timed test sweep for speed calibration
-    // During sweep: servo runs at maxSpeed, virtual angle is NOT updated (raw motor test)
-    // After sweep: app asks user for actual degrees → computes real dps
+    // TCAL:UP[:ms] / TCAL:DN[:ms] / TCAL:STOP
+    // Uses tcalSpeed (NOT maxSpeed) for safe calibration sweeps
+    // Estimates angle using current dps, auto-stops at TCAL_MAX_DEGREES
+    // Optional duration: TCAL:UP:750 → 750ms test
     if ((ptr = strstr(cmd, "TCAL:")) != NULL) {
-        char dir[8];
-        sscanf(ptr + 5, "%7s", dir);
+        char dir[8] = {0};
+        int durationArg = 0;
+        sscanf(ptr + 5, "%7[A-Z]:%d", dir, &durationArg);
+        if (durationArg > 0) tcalDurationMs = constrain(durationArg, 100, 2000);
+
         if (strcmp(dir, "UP") == 0) {
-            tcalActive = true;
-            tcalDone = false;
-            tcalDirection = -1;  // angle decreasing = camera up
+            tcalActive = true; tcalDone = false;
+            tcalDirection = -1;
             tcalStartAngle = virtualTiltAngle;
+            tcalEstimatedAngle = 0.0f;
             tcalStartMs = millis();
-            Serial.printf("TCAL UP: start=%.1f\n", tcalStartAngle);
+            calMode = true;
+            Serial.printf("TCAL UP: start=%.1f speed=%d dur=%lums\n",
+                tcalStartAngle, tcalSpeed, (unsigned long)tcalDurationMs);
         } else if (strcmp(dir, "DN") == 0) {
-            tcalActive = true;
-            tcalDone = false;
-            tcalDirection = +1;  // angle increasing = camera down
+            tcalActive = true; tcalDone = false;
+            tcalDirection = +1;
             tcalStartAngle = virtualTiltAngle;
+            tcalEstimatedAngle = 0.0f;
             tcalStartMs = millis();
-            Serial.printf("TCAL DN: start=%.1f\n", tcalStartAngle);
-        } else if (strcmp(dir, "STOP") == 0) {
+            calMode = true;
+            Serial.printf("TCAL DN: start=%.1f speed=%d dur=%lums\n",
+                tcalStartAngle, tcalSpeed, (unsigned long)tcalDurationMs);
+        } else if (strcmp(dir, "STOP") == 0 || strcmp(dir, "STO") == 0) {
             tcalActive = false;
             servoTilt.write(tiltCfg.neutral);
             currentTiltPwm = tiltCfg.neutral;
             tiltTargetAngle = virtualTiltAngle;
             Serial.println("TCAL STOP");
         }
+    }
+
+    // PAN/TILT — IGNORED in calMode (prevents interference during calibration)
+    if (calMode) {
+        lastCmdTime = millis();
+        return;  // skip PAN/TILT processing
     }
 
     if (hp) {
@@ -465,24 +497,31 @@ void updateServos() {
     if (dt <= 0 || dt > 0.5f) dt = 0.01f;
 
     // ── TCAL test sweep mode ────────────────────────────────────────
-    // Raw motor test: servo runs at maxSpeed, NO virtual angle integration
-    // This lets us measure actual physical movement independently
+    // Uses tcalSpeed (NOT maxSpeed) for safe calibration
+    // Estimates angle from current dps, auto-stops at TCAL_MAX_DEGREES
     if (tcalActive) {
-        if (now - tcalStartMs >= tcalDurationMs) {
+        // Estimate how far we've traveled (for safety auto-stop)
+        float dps = (tcalDirection > 0) ? tiltCfg.dpsCamDn : tiltCfg.dpsCamUp;
+        float speedFrac = (float)tcalSpeed / (float)tiltCfg.maxSpeed;
+        tcalEstimatedAngle += fabsf(dps * speedFrac * dt);
+
+        bool timeUp = (now - tcalStartMs >= tcalDurationMs);
+        bool angleLimit = (tcalEstimatedAngle >= TCAL_MAX_DEGREES);
+
+        if (timeUp || angleLimit) {
             // Test done — stop servo
             servoTilt.write(tiltCfg.neutral);
             currentTiltPwm = tiltCfg.neutral;
             tcalActive = false;
             tcalDone = true;
             tcalElapsedMs = now - tcalStartMs;
-            // Do NOT touch virtualTiltAngle — it stays at startAngle
-            // App will ask user for actual degrees and sync via VCAL
-            tiltTargetAngle = virtualTiltAngle;  // prevent drift after stop
-            Serial.printf("TCAL done: %lums (virtual unchanged at %.1f°)\n",
-                (unsigned long)tcalElapsedMs, virtualTiltAngle);
+            tiltTargetAngle = virtualTiltAngle;  // freeze position
+            Serial.printf("TCAL done: %lums est=%.1f° %s (virtual unchanged at %.1f°)\n",
+                (unsigned long)tcalElapsedMs, tcalEstimatedAngle,
+                angleLimit ? "ANGLE_LIMIT" : "TIME_UP", virtualTiltAngle);
         } else {
-            // Move at constant speed in requested direction (no integration!)
-            int speed = tcalDirection * tiltCfg.maxSpeed;
+            // Move at tcalSpeed (not maxSpeed!)
+            int speed = tcalDirection * tcalSpeed;
             int pwm = constrain(tiltCfg.neutral + speed, 0, 180);
             servoTilt.write(pwm);
             currentTiltPwm = pwm;

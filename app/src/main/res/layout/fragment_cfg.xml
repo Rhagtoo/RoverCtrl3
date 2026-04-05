@@ -297,16 +297,45 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center"
+            android:layout_marginBottom="4dp">
+
+            <!-- Test duration selector -->
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Test:" android:textColor="#AAAAAA" android:textSize="11sp"
+                android:layout_marginEnd="4dp" />
+            <RadioGroup android:id="@+id/rg_tcal_duration"
+                android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:orientation="horizontal" android:gravity="center">
+                <RadioButton android:id="@+id/rb_tcal_05s" android:layout_width="wrap_content"
+                    android:layout_height="32dp" android:text="0.5s" android:textSize="11sp"
+                    android:textColor="#AAAAAA" android:checked="true" android:minWidth="0dp"
+                    android:paddingStart="4dp" android:paddingEnd="8dp" />
+                <RadioButton android:id="@+id/rb_tcal_1s" android:layout_width="wrap_content"
+                    android:layout_height="32dp" android:text="1s" android:textSize="11sp"
+                    android:textColor="#AAAAAA" android:minWidth="0dp"
+                    android:paddingStart="4dp" android:paddingEnd="8dp" />
+                <RadioButton android:id="@+id/rb_tcal_2s" android:layout_width="wrap_content"
+                    android:layout_height="32dp" android:text="2s" android:textSize="11sp"
+                    android:textColor="#AAAAAA" android:minWidth="0dp"
+                    android:paddingStart="4dp" android:paddingEnd="8dp" />
+            </RadioGroup>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
             android:layout_marginBottom="8dp">
 
             <Button android:id="@+id/btn_tcal_up"
                 android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1"
-                android:text="Test ↑ 2s" android:textSize="12sp"
+                android:text="Test ↑" android:textSize="12sp"
                 android:backgroundTint="#1565C0" android:layout_marginEnd="4dp" />
 
             <Button android:id="@+id/btn_tcal_dn"
                 android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1"
-                android:text="Test ↓ 2s" android:textSize="12sp"
+                android:text="Test ↓" android:textSize="12sp"
                 android:backgroundTint="#1565C0" android:layout_marginEnd="4dp" />
 
             <Button android:id="@+id/btn_tp_save"
@@ -358,7 +387,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="1) Set Virtual=90, position camera forward\n2) Test ↑ or ↓ — motor runs 2s\n3) Enter actual degrees moved → auto-calculates °/s"
+            android:text="1) Set Virtual=90, position camera forward\n2) Start with 0.5s test, increase if too small\n3) Enter actual degrees → auto-calculates °/s\n⚠ High speed + long test = full rotation = wire wrap!"
             android:textColor="#666666"
             android:textSize="10sp"
             android:layout_marginBottom="4dp" />
