@@ -125,7 +125,7 @@ class ObjectTracker(
     )
 
     fun process(frame: Bitmap): TrackResult {
-        if (closed) return TrackResult(null, null, 0f, 0f)
+        if (closed) return TrackResult(false, 0f, 0f, null)
         framesSinceDetection++
         val currentTime = System.currentTimeMillis()
 
