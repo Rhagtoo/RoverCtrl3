@@ -231,10 +231,7 @@ class VideoFragment : Fragment() {
                 else          -> 0xFFFF5252.toInt()
             }
             tvLatency.setTextColor(color)
-            tvLatency.text = if (inferMs > 0f)
-                "lat: %.0f ms · inf: %.0f ms · fps: %.0f".format(totalMs, inferMs, lastCameraFps)
-            else
-                "lat: %.0f ms · fps: %.0f".format(totalMs, lastCameraFps)
+            tvLatency.text = "lat: %.0f ms · fps: %.0f".format(totalMs, lastCameraFps)
         }
     }
 
