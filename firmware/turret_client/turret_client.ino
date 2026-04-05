@@ -1,14 +1,11 @@
 /**
- * turret_client.ino v2.7
+ * turret_client.ino v2.7.1
  *
- * Changes from v2.6:
- *   PERF: camera HVGA (480×320) + quality 10 (was VGA + quality 6)
- *   PERF: removed ArduinoOTA (mDNS overhead eliminated)
- *   PERF: removed Arduino WebServer on port 80 (sync blocking eliminated)
- *   PERF: all HTTP on single async esp_httpd (port 81)
- *         /stream, /capture, /status, /update (GET=form, POST=raw binary)
- *   FIX:  /status JSON was referencing undefined variables on port 80
- *   PERF: loop() now only: checkWiFi + updateServos + delay(10)
+ * Changes from v2.7:
+ *   FIX: VCAL now forces servo to neutral (prevents race condition jitter)
+ *   FIX: TCAL no longer integrates virtualAngle during sweep (was circular!)
+ *        Motor just runs 2s raw, app asks user for actual degrees → computes dps
+ *   ADD: /status includes tcalDone, tcalElapsedMs, tcalStartAngle for app sync
  *
  * Kept from v2.6:
  *   - CR tilt with virtual angle + NVS persistence
@@ -99,10 +96,12 @@ unsigned long lastReconnectAttempt = 0, lastCmdTime = 0;
 
 // ═══ TCAL test sweep state ═══
 bool  tcalActive = false;
-int   tcalDirection = 0;       // +1 = angle increasing (cam down), -1 = angle decreasing (cam up)
+bool  tcalDone = false;          // true after sweep completes, until next TCAL
+int   tcalDirection = 0;
 float tcalStartAngle = 0.0f;
 unsigned long tcalStartMs = 0;
 unsigned long tcalDurationMs = 2000;
+unsigned long tcalElapsedMs = 0; // actual elapsed time of last sweep
 
 // ═══ NVS ═══
 void loadTiltConfig() {
@@ -190,16 +189,20 @@ esp_err_t capture_handler(httpd_req_t* r) {
 
 // ── /status — JSON telemetry ──
 esp_err_t status_handler(httpd_req_t* r) {
-    char b[512];
+    char b[640];
     snprintf(b, sizeof(b),
         "{\"pan\":%d,\"tilt\":%.1f,\"tiltTarget\":%.1f,\"tiltPwm\":%d,"
         "\"neutral\":%d,\"maxSpeed\":%d,\"deadband\":%.1f,"
         "\"dpsUp\":%.0f,\"dpsDn\":%.0f,\"driftCorr\":%.0f,"
-        "\"tcalActive\":%s,\"heap\":%lu,\"rssi\":%d}",
+        "\"tcalActive\":%s,\"tcalDone\":%s,\"tcalElapsedMs\":%lu,\"tcalStartAngle\":%.1f,"
+        "\"heap\":%lu,\"rssi\":%d}",
         currentPan, virtualTiltAngle, tiltTargetAngle, currentTiltPwm,
         tiltCfg.neutral, tiltCfg.maxSpeed, tiltCfg.deadband,
         tiltCfg.dpsCamUp, tiltCfg.dpsCamDn, tiltCfg.driftCorr,
         tcalActive ? "true" : "false",
+        tcalDone ? "true" : "false",
+        (unsigned long)tcalElapsedMs,
+        tcalStartAngle,
         (unsigned long)ESP.getFreeHeap(), WiFi.RSSI());
     httpd_resp_set_type(r, "application/json");
     httpd_resp_set_hdr(r, "Access-Control-Allow-Origin", "*");
@@ -218,7 +221,7 @@ button{background:#0f0;color:#111;border:none;padding:8px 24px;cursor:pointer;fo
 #bar{width:100%;height:20px;background:#333;margin:8px 0;display:none}
 #fill{height:100%;width:0%;background:#0f0;transition:width 0.2s}
 </style></head><body>
-<h2>Turret OTA v2.7</h2>
+<h2>Turret OTA v2.7.1</h2>
 <input type='file' id='fw' accept='.bin'>
 <button onclick='upload()'>Flash</button>
 <div id='bar'><div id='fill'></div></div>
@@ -318,7 +321,7 @@ esp_err_t update_post_handler(httpd_req_t* r) {
 esp_err_t root_handler(httpd_req_t* r) {
     char b[256];
     snprintf(b, sizeof(b),
-        "XIAO Turret v2.7\n"
+        "XIAO Turret v2.7.1\n"
         "Heap: %lu\n"
         "Endpoints: /stream /capture /status /update\n",
         (unsigned long)ESP.getFreeHeap());
@@ -364,13 +367,17 @@ void parseCommand(const char* cmd) {
     if ((ptr = strstr(cmd, "PAN:")) != NULL)  { pan = atoi(ptr + 4); hp = true; }
     if ((ptr = strstr(cmd, "TILT:")) != NULL)  { tilt = atoi(ptr + 5); ht = true; }
 
-    // VCAL:<angle> — direct virtual angle set (calibration from app)
+    // VCAL:<angle> — set virtual angle reference (calibration)
+    // Sets BOTH virtual and target to same value → error=0 → no movement
+    // Also forces servo to neutral to prevent any race conditions
     if ((ptr = strstr(cmd, "VCAL:")) != NULL) {
         float cal = atof(ptr + 5);
         cal = constrain(cal, 0.0f, 180.0f);
         virtualTiltAngle = cal;
         tiltTargetAngle = cal;
-        Serial.printf("VCAL: virtual=%.1f\n", cal);
+        servoTilt.write(tiltCfg.neutral);  // force stop
+        currentTiltPwm = tiltCfg.neutral;
+        Serial.printf("VCAL: virtual=%.1f (servo stopped)\n", cal);
     }
 
     // TSET:N:<neutral>;S:<maxSpeed>;U:<dpsUp>;D:<dpsDn>;DB:<deadband>;DC:<driftCorr>
@@ -393,17 +400,21 @@ void parseCommand(const char* cmd) {
     }
 
     // TCAL:UP / TCAL:DN / TCAL:STOP — timed test sweep for speed calibration
+    // During sweep: servo runs at maxSpeed, virtual angle is NOT updated (raw motor test)
+    // After sweep: app asks user for actual degrees → computes real dps
     if ((ptr = strstr(cmd, "TCAL:")) != NULL) {
         char dir[8];
         sscanf(ptr + 5, "%7s", dir);
         if (strcmp(dir, "UP") == 0) {
             tcalActive = true;
+            tcalDone = false;
             tcalDirection = -1;  // angle decreasing = camera up
             tcalStartAngle = virtualTiltAngle;
             tcalStartMs = millis();
             Serial.printf("TCAL UP: start=%.1f\n", tcalStartAngle);
         } else if (strcmp(dir, "DN") == 0) {
             tcalActive = true;
+            tcalDone = false;
             tcalDirection = +1;  // angle increasing = camera down
             tcalStartAngle = virtualTiltAngle;
             tcalStartMs = millis();
@@ -445,28 +456,27 @@ void updateServos() {
     if (dt <= 0 || dt > 0.5f) dt = 0.01f;
 
     // ── TCAL test sweep mode ────────────────────────────────────────
+    // Raw motor test: servo runs at maxSpeed, NO virtual angle integration
+    // This lets us measure actual physical movement independently
     if (tcalActive) {
         if (now - tcalStartMs >= tcalDurationMs) {
-            // Test done — stop servo, report result
+            // Test done — stop servo
             servoTilt.write(tiltCfg.neutral);
             currentTiltPwm = tiltCfg.neutral;
             tcalActive = false;
-            tiltTargetAngle = virtualTiltAngle;  // hold position
-            float delta = virtualTiltAngle - tcalStartAngle;
-            float elapsed = (now - tcalStartMs) / 1000.0f;
-            Serial.printf("TCAL done: delta=%.1f° in %.2fs (%.1f°/s)\n",
-                delta, elapsed, delta / elapsed);
+            tcalDone = true;
+            tcalElapsedMs = now - tcalStartMs;
+            // Do NOT touch virtualTiltAngle — it stays at startAngle
+            // App will ask user for actual degrees and sync via VCAL
+            tiltTargetAngle = virtualTiltAngle;  // prevent drift after stop
+            Serial.printf("TCAL done: %lums (virtual unchanged at %.1f°)\n",
+                (unsigned long)tcalElapsedMs, virtualTiltAngle);
         } else {
-            // Move at constant speed in requested direction
+            // Move at constant speed in requested direction (no integration!)
             int speed = tcalDirection * tiltCfg.maxSpeed;
             int pwm = constrain(tiltCfg.neutral + speed, 0, 180);
             servoTilt.write(pwm);
             currentTiltPwm = pwm;
-
-            // Open-loop integration with correct speed mapping
-            float dps = (tcalDirection > 0) ? tiltCfg.dpsCamDn : tiltCfg.dpsCamUp;
-            virtualTiltAngle += tcalDirection * dps * dt;
-            virtualTiltAngle = constrain(virtualTiltAngle, TILT_MIN_ANGLE, TILT_MAX_ANGLE);
         }
         return;  // skip normal control during TCAL
     }
@@ -554,7 +564,7 @@ void udpTask(void* p) {
 // ═══ Setup & Loop ═══
 void setup() {
     Serial.begin(115200);
-    Serial.println("\n=== Turret v2.7 — lean & fast ===");
+    Serial.println("\n=== Turret v2.7.1 — lean & fast ===");
 
     // Load tilt config from NVS (or defaults)
     loadTiltConfig();

@@ -171,34 +171,30 @@
             android:padding="10dp"
             android:layout_marginBottom="10dp" />
 
-        <!-- ±1°/±5° buttons row -->
+        <!-- Set virtual angle reference (no movement) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="center"
+            android:gravity="center_vertical"
             android:layout_marginBottom="8dp">
 
-            <Button android:id="@+id/btn_tilt_m5"
-                android:layout_width="56dp" android:layout_height="44dp"
-                android:text="-5°" android:textSize="13sp"
-                android:backgroundTint="#555555" android:layout_marginEnd="4dp" />
-            <Button android:id="@+id/btn_tilt_m1"
-                android:layout_width="56dp" android:layout_height="44dp"
-                android:text="-1°" android:textSize="13sp"
-                android:backgroundTint="#555555" android:layout_marginEnd="8dp" />
-            <Button android:id="@+id/btn_tilt_reset"
-                android:layout_width="72dp" android:layout_height="44dp"
-                android:text="90°" android:textSize="13sp"
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Virtual °:" android:textColor="#AAAAAA" android:textSize="12sp"
+                android:layout_marginEnd="8dp" />
+            <EditText android:id="@+id/et_vcal_angle"
+                android:layout_width="72dp" android:layout_height="40dp"
+                android:text="90" android:textColor="#FFFFFF" android:textSize="14sp"
+                android:inputType="numberDecimal" android:gravity="center"
+                android:background="#333333" android:padding="6dp"
+                android:layout_marginEnd="8dp" />
+            <Button android:id="@+id/btn_vcal_set"
+                android:layout_width="wrap_content" android:layout_height="40dp"
+                android:text="Set" android:textSize="12sp"
                 android:backgroundTint="#7C4DFF" />
-            <Button android:id="@+id/btn_tilt_p1"
-                android:layout_width="56dp" android:layout_height="44dp"
-                android:text="+1°" android:textSize="13sp"
-                android:backgroundTint="#555555" android:layout_marginStart="8dp" />
-            <Button android:id="@+id/btn_tilt_p5"
-                android:layout_width="56dp" android:layout_height="44dp"
-                android:text="+5°" android:textSize="13sp"
-                android:backgroundTint="#555555" android:layout_marginStart="4dp" />
+            <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Camera stays put" android:textColor="#666666" android:textSize="10sp" />
         </LinearLayout>
 
         <!-- ═══════════════════════════════════════════════════════════════ -->
@@ -329,10 +325,40 @@
             android:fontFamily="monospace"
             android:layout_marginBottom="4dp" />
 
+        <!-- After test: enter actual degrees moved -->
+        <LinearLayout
+            android:id="@+id/ll_tcal_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone"
+            android:layout_marginBottom="8dp">
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Actual °:" android:textColor="#AAAAAA" android:textSize="12sp"
+                android:layout_marginEnd="8dp" />
+            <EditText android:id="@+id/et_tcal_actual"
+                android:layout_width="72dp" android:layout_height="40dp"
+                android:text="" android:textColor="#FFFFFF" android:textSize="14sp"
+                android:inputType="numberDecimal" android:gravity="center"
+                android:background="#333333" android:padding="6dp"
+                android:hint="°" android:textColorHint="#555555"
+                android:layout_marginEnd="8dp" />
+            <Button android:id="@+id/btn_tcal_apply"
+                android:layout_width="wrap_content" android:layout_height="40dp"
+                android:text="Apply" android:textSize="12sp"
+                android:backgroundTint="#00695C" android:layout_marginEnd="8dp" />
+            <Button android:id="@+id/btn_tcal_cancel"
+                android:layout_width="wrap_content" android:layout_height="40dp"
+                android:text="Cancel" android:textSize="12sp"
+                android:backgroundTint="#555555" />
+        </LinearLayout>
+
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Test moves tilt 2s in one direction. Compare virtual Δ with physical movement.\nIf drift: adjust °/s until virtual matches real."
+            android:text="1) Set Virtual=90, position camera forward\n2) Test ↑ or ↓ — motor runs 2s\n3) Enter actual degrees moved → auto-calculates °/s"
             android:textColor="#666666"
             android:textSize="10sp"
             android:layout_marginBottom="4dp" />
