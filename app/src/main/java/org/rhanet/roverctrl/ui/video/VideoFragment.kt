@@ -270,6 +270,7 @@ class VideoFragment : Fragment() {
     }
 
     private fun setSwapped(s: Boolean) {
+        Log.d(TAG, "setSwapped: $s")
         swapped = s
         val mode = vm.trackMode.value
         if (swapped) {
@@ -308,6 +309,7 @@ class VideoFragment : Fragment() {
     // ── XIAO Frame Analysis (swapped + tracking) ─────────────────────────
 
     private fun updateXiaoAnalysis() {
+        Log.d(TAG, "updateXiaoAnalysis: swapped=$swapped mode=${vm.trackMode.value}")
         xiaoAnalysisJob?.cancel()
         val mode = vm.trackMode.value
         if (swapped && (mode == TrackingMode.LASER_DOT || mode == TrackingMode.OBJECT_TRACK)) {
