@@ -246,7 +246,16 @@ class VideoFragment : Fragment() {
                 if (bmp != null) {
                     if (swapped) {
                         Log.d(TAG, "Setting XIAO bitmap: ${bmp.width}x${bmp.height}")
-                        ivXiaoMain.setImageBitmap(bmp)
+                        // XIAO камера в portrait, поворачиваем на 90° для landscape отображения
+                        val rotated = if (bmp.width < bmp.height) {
+                            // Портретная ориентация, поворачиваем на 90°
+                            val matrix = Matrix().apply { postRotate(90f) }
+                            Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                        } else {
+                            bmp
+                        }
+                        ivXiaoMain.setImageBitmap(rotated)
+                        // Не освобождаем оригинальный bitmap, т.к. он управляется ViewModel
                     }
                     else if (pipContainer.visibility == View.VISIBLE) ivTurretPip.setImageBitmap(bmp)
                 }

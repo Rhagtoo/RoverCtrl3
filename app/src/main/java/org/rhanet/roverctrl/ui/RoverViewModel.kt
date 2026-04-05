@@ -185,6 +185,7 @@ class RoverViewModel : ViewModel() {
             onFrame = { bmp ->
                 // Всегда создаём копию bitmap для thread safety
                 // XIAO камера в portrait, поворачиваем на 90° для landscape ориентации
+                Log.d(TAG, "Turret frame received: ${bmp.width}x${bmp.height}, rotation=$TURRET_ROTATION_DEG")
                 val frameToUse = if (TURRET_ROTATION_DEG == 0f) {
                     // Создаём копию без поворота
                     bmp.copy(bmp.config, true) ?: run {
@@ -193,7 +194,9 @@ class RoverViewModel : ViewModel() {
                     }
                 } else {
                     // Создаём копию с поворотом
-                    Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, turretRotMatrix, true)
+                    val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, turretRotMatrix, true)
+                    Log.d(TAG, "After rotation: ${rotated.width}x${rotated.height}")
+                    rotated
                 }
                 
                 // Освобождаем оригинальный bitmap после создания копии
