@@ -3,6 +3,7 @@ package org.rhanet.roverctrl.tracking
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import kotlin.jvm.Volatile
 import org.rhanet.roverctrl.data.DetectionResult
 import org.tensorflow.lite.Interpreter
 import java.io.FileInputStream
@@ -49,6 +50,7 @@ class ObjectTracker(
     private val minTrackingConfidence = 0.1f
 
     private var cachedOutputBuffer: Array<Array<FloatArray>>? = null
+    @Volatile private var closed = false
 
     companion object {
         private const val TAG = "ObjectTracker"
@@ -123,6 +125,7 @@ class ObjectTracker(
     )
 
     fun process(frame: Bitmap): TrackResult {
+        if (closed) return TrackResult(null, null, 0f, 0f)
         framesSinceDetection++
         val currentTime = System.currentTimeMillis()
 
@@ -243,23 +246,27 @@ class ObjectTracker(
     }
 
     private fun detect(frame: Bitmap): DetectionResult? {
-        val sz = modelInputSize
-        val scaled = Bitmap.createScaledBitmap(frame, sz, sz, true)
-        val input  = if (inputNchw) bitmapToNchwBuffer(scaled) else bitmapToNhwcBuffer(scaled)
-        scaled.recycle()
+        if (closed) return null
+        synchronized(this) {
+            if (closed) return null
+            val sz = modelInputSize
+            val scaled = Bitmap.createScaledBitmap(frame, sz, sz, true)
+            val input = if (inputNchw) bitmapToNchwBuffer(scaled) else bitmapToNhwcBuffer(scaled)
+            scaled.recycle()
 
-        val outShape = interp.getOutputTensor(0).shape()
-        val dim1 = outShape[1]
-        val dim2 = outShape[2]
+            val outShape = interp.getOutputTensor(0).shape()
+            val dim1 = outShape[1]
+            val dim2 = outShape[2]
 
-        val outputBuf = cachedOutputBuffer?.takeIf {
-            it.size == 1 && it[0].size == dim1 && it[0][0].size == dim2
-        } ?: Array(1) { Array(dim1) { FloatArray(dim2) } }.also {
-            cachedOutputBuffer = it
+            val outputBuf = cachedOutputBuffer?.takeIf {
+                it.size == 1 && it[0].size == dim1 && it[0][0].size == dim2
+            } ?: Array(1) { Array(dim1) { FloatArray(dim2) } }.also {
+                cachedOutputBuffer = it
+            }
+
+            interp.run(input, outputBuf)
+            return bestBox(outputBuf[0], dim1, dim2)
         }
-
-        interp.run(input, outputBuf)
-        return bestBox(outputBuf[0], dim1, dim2)
     }
 
     private fun bestBox(out: Array<FloatArray>, dim1: Int, dim2: Int): DetectionResult? {
@@ -348,5 +355,13 @@ class ObjectTracker(
         Log.d(TAG, "Sensitivity updated: pan=$panSens, tilt=$tiltSens")
     }
 
-    fun close() = interp.close()
+    fun isClosed(): Boolean = closed
+
+    fun close() {
+        synchronized(this) {
+            if (closed) return
+            closed = true
+            interp.close()
+        }
+    }
 }
