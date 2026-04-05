@@ -178,6 +178,7 @@ class RoverViewModel : ViewModel() {
     // ── Turret stream ─────────────────────────────────────────────────────
 
     private fun startTurretStream(url: String) {
+        Log.d(TAG, "Starting turret stream: $url")
         stopTurretStream()
         mjpegDecoder = MjpegDecoder(
             url = url,
@@ -209,7 +210,7 @@ class RoverViewModel : ViewModel() {
             },
             onFps   = { fps -> mainHandler.post { _turretFps.value = fps } },
             onError = { e ->
-                Log.w(TAG, "MJPEG: ${e.message}")
+                Log.w(TAG, "MJPEG error: ${e.message}")
                 mainHandler.post { _turretConnected.value = false }
             }
         ).also { it.start() }

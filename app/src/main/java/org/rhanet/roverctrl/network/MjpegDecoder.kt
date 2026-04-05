@@ -112,7 +112,9 @@ class MjpegDecoder(
                         if (bmp != null) {
                             totalFrames++
                             updateFps()
-                            
+                            if (totalFrames == 1L) {
+                                Log.i(TAG, "First frame received: ${bmp.width}x${bmp.height}")
+                            }
                             // ВАЖНО: Передаём bitmap callback'у
                             // Callback отвечает за его освобождение или копирование
                             onFrame(bmp)

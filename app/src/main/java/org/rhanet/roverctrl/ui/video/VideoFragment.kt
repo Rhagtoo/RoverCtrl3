@@ -244,7 +244,10 @@ class VideoFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             vm.turretFrame.collectLatest { bmp ->
                 if (bmp != null) {
-                    if (swapped) ivXiaoMain.setImageBitmap(bmp)
+                    if (swapped) {
+                        Log.d(TAG, "Setting XIAO bitmap: ${bmp.width}x${bmp.height}")
+                        ivXiaoMain.setImageBitmap(bmp)
+                    }
                     else if (pipContainer.visibility == View.VISIBLE) ivTurretPip.setImageBitmap(bmp)
                 }
             }
