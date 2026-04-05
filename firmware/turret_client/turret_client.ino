@@ -149,7 +149,16 @@ bool setupCamera() {
     c.jpeg_quality = 10;               // 0-63, lower = better quality
     c.fb_count     = 2;
     c.grab_mode    = CAMERA_GRAB_LATEST;
-    return esp_camera_init(&c) == ESP_OK;
+    if (esp_camera_init(&c) != ESP_OK) return false;
+
+    // Sensor orientation for XIAO Sense mounting
+    // Adjust if image is flipped/mirrored on your build
+    sensor_t* s = esp_camera_sensor_get();
+    if (s) {
+        s->set_vflip(s, 0);     // 0=normal, 1=vertical flip
+        s->set_hmirror(s, 0);   // 0=normal, 1=horizontal mirror
+    }
+    return true;
 }
 
 // ═══ HTTP handlers (all on port 81, async esp_httpd) ═══

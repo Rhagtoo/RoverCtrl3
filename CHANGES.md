@@ -1,41 +1,29 @@
-# v2.8 — Performance Optimization (XIAO + YOLO pipeline)
+# v2.8.1 — XIAO Landscape Fix
 
-Target branch: bugfixes-2026-04-05
+Target branch: bugfixes-2026-04-05 (поверх v2.8)
 
-## Симптом
-Видео с XIAO в YOLO-режиме периодически замирает на 2-5 секунд.
+## Проблема
+Видео с XIAO отображается как узкая вертикальная полоса.
 
-## Корневая причина
-1. MjpegDecoder: O(n²) ByteArray конкатенация → GC-шторм → фриз
-2. 4× копирование bitmap на кадр (decode→VM→Fragment→YOLO) = 30MB/с GC
-3. Нет backpressure: executor queue растёт → память → GC → фриз
+## Причина
+Двойная ротация:
+1. ViewModel: TURRET_ROTATION_DEG=90 → 480×320 → 320×480 (portrait)
+2. VideoFragment PiP: отображал 320×480 as-is → вертикальная полоса
 
 ## Исправления
 
-### MjpegDecoder.kt
-- ByteArrayOutputStream вместо data += buf (amortized O(1))
-- BitmapFactory.Options.inBitmap — переиспользование bitmap
-- Быстрый 2-byte SOI/EOI поиск
-
 ### RoverViewModel.kt
-- Убран Log.d() на каждый кадр турели (10-15fps string format + IPC)
-- Не recycle bitmap от MjpegDecoder (reused через inBitmap)
+- TURRET_ROTATION_DEG = 0 (убрана ротация)
+- OV2640 HVGA выдаёт 480×320 landscape — ротация не нужна
+- Не recycle bitmap от MjpegDecoder (нужен для inBitmap reuse из v2.8)
 
-### VideoFragment.kt
-- Inference gate (AtomicBoolean): YOLO занят → кадр пропускается
-- Счётчик d:N в HUD для диагностики
-- 1 copy вместо 2
-
-### ObjectTracker.kt
-- Cached ByteBuffer (5MB → 0 аллок/кадр)
-- Cached IntArray (1.6MB → 0 аллок/кадр)
-- NNAPI delegate (try→GPU→CPU fallback)
-- Убран per-detection Log.d()
-
-## Диагностика
-HUD: `lat: 85 ms · fps: 30 d:142`
-d:N = пропущенные кадры анализа (нормально, gate работает)
+### firmware/turret_client.ino
+- Добавлен sensor config после esp_camera_init:
+  set_vflip(0), set_hmirror(0)
+- Если изображение перевёрнуто → поменять на 1 в коде и перепрошить
 
 ## Установка
-1. Распаковать в корень репы (ветка bugfixes-2026-04-05)
-2. Собрать APK — изменения только на стороне телефона
+1. Распаковать в корень репы
+2. Если изображение перевёрнуто/зеркальное — поменять vflip/hmirror в
+   firmware/turret_client/turret_client.ino, перепрошить
+3. Собрать APK

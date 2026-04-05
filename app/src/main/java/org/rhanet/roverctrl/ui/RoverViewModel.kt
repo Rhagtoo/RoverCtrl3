@@ -36,7 +36,8 @@ class RoverViewModel : ViewModel() {
         private const val TAG = "RoverVM"
         private const val CMD_TICK_MS = 50L
         private const val RSSI_POLL_MS = 2000L
-        private const val TURRET_ROTATION_DEG = 90f
+        // OV2640 HVGA = 480×320 landscape. 0 = no rotation needed.
+        private const val TURRET_ROTATION_DEG = 0f
     }
 
     val sender   = CommandSender()
@@ -183,20 +184,21 @@ class RoverViewModel : ViewModel() {
         mjpegDecoder = MjpegDecoder(
             url = url,
             onFrame = { bmp ->
-                // v2.8: removed per-frame Log.d — was 15 writes/sec killing logcat
-                // Rotate XIAO portrait → landscape in single operation
+                // TURRET_ROTATION_DEG=0: OV2640 HVGA outputs landscape directly
+                // Copy bitmap because MjpegDecoder reuses it via inBitmap
+                // Do NOT recycle bmp — MjpegDecoder owns it for inBitmap recycling
                 val frame = if (TURRET_ROTATION_DEG == 0f) {
                     bmp.copy(bmp.config ?: Bitmap.Config.ARGB_8888, false)
                 } else {
                     Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, turretRotMatrix, true)
                 }
-                // Recycle decoded bitmap — we have our rotated copy
-                if (frame !== bmp) bmp.recycle()
 
-                mainHandler.post {
-                    _turretFrame.value?.recycle()
-                    _turretFrame.value = frame
-                    _turretConnected.value = true
+                if (frame != null) {
+                    mainHandler.post {
+                        _turretFrame.value?.recycle()
+                        _turretFrame.value = frame
+                        _turretConnected.value = true
+                    }
                 }
             },
             onFps   = { fps -> mainHandler.post { _turretFps.value = fps } },
