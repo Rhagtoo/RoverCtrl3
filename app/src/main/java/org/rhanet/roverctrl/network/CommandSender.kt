@@ -70,12 +70,15 @@ class CommandSender {
     }
 
     fun sendXiao(pan: Int, tilt: Int) {
+        Log.d(TAG, "sendXiao: pan=$pan, tilt=$tilt")
         val panScaled = (pan * 90 / 100).coerceIn(-90, 90)
         val tiltScaled = (tilt * 90 / 100).coerceIn(-90, 90)
+        Log.d(TAG, "sendXiao scaled: panScaled=$panScaled, tiltScaled=$tiltScaled")
         val msg = "PAN:$panScaled;TILT:$tiltScaled\n"
         scope.launch {
             val addr = xiaoAddr
             if (addr != null) {
+                Log.d(TAG, "Sending to $addr:$xiaoPort: $msg")
                 sendRaw(msg.toByteArray(), addr, xiaoPort)
             }
         }
