@@ -578,8 +578,15 @@ class CfgFragment : Fragment() {
         vm.updateSensitivity(requireContext(), s)
     }
 
+    override fun onStop() {
+        super.onStop()
+        Log.d(TAG, "onStop: stopping tilt polling")
+        stopTiltPolling()
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
+        Log.d(TAG, "onDestroyView: stopping tilt polling")
         stopTiltPolling()
     }
 }

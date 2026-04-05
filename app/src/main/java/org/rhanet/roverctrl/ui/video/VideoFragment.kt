@@ -204,8 +204,8 @@ class VideoFragment : Fragment() {
     private fun updateLatencyManual() {
         handler.post {
             tvLatency.text = if (lastCameraFps > 0f)
-                "cam %.0f fps".format(lastCameraFps)
-            else "-- ms"
+                "fps: %.0f".format(lastCameraFps)
+            else "--"
             tvLatency.setTextColor(0xFFAAAAAA.toInt())
         }
     }
@@ -232,9 +232,9 @@ class VideoFragment : Fragment() {
             }
             tvLatency.setTextColor(color)
             tvLatency.text = if (inferMs > 0f)
-                "%.0fms  infer %.0fms  · cam %.0ffps".format(totalMs, inferMs, lastCameraFps)
+                "lat: %.0f ms · inf: %.0f ms · fps: %.0f".format(totalMs, inferMs, lastCameraFps)
             else
-                "%.0fms  · cam %.0ffps".format(totalMs, lastCameraFps)
+                "lat: %.0f ms · fps: %.0f".format(totalMs, lastCameraFps)
         }
     }
 
@@ -460,7 +460,7 @@ class VideoFragment : Fragment() {
         val now = System.currentTimeMillis()
         if (now - lastFpsTime >= 1000) {
             lastCameraFps = frameCount * 1000f / (now - lastFpsTime)
-            handler.post { tvFps.text = "%.0f FPS".format(lastCameraFps) }
+            handler.post { tvFps.text = "fps: %.0f".format(lastCameraFps) }
             frameCount = 0
             lastFpsTime = now
             // В Manual обновляем латенси просто FPS-ом
@@ -616,8 +616,20 @@ class VideoFragment : Fragment() {
         }
     }
 
+    override fun onStop() {
+        super.onStop()
+        Log.d(TAG, "onStop: fragment going to background")
+        xiaoAnalysisJob?.cancel()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        Log.d(TAG, "onPause: fragment paused")
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
+        Log.d(TAG, "onDestroyView: cancelling jobs and releasing resources")
         xiaoAnalysisJob?.cancel()
         cameraProvider?.unbindAll()
         objectTracker?.close()
