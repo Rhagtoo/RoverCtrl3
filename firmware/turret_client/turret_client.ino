@@ -110,8 +110,8 @@ float tcalEstimatedAngle = 0.0f;  // estimated angle during sweep (using current
 unsigned long tcalStartMs = 0;
 unsigned long tcalDurationMs = 500;    // v2.9: default 0.5s (was 2s)
 unsigned long tcalElapsedMs = 0;
-int   tcalSpeed = 20;             // separate safe speed for TCAL (default 20, NOT maxSpeed)
-#define TCAL_MAX_DEGREES 60.0f    // auto-stop if estimated travel exceeds this
+// Safety: max degrees a single TCAL can travel (prevents wire wrapping)
+#define TCAL_MAX_DEGREES 60.0f
 
 // ═══ NVS ═══
 void loadTiltConfig() {
@@ -213,14 +213,14 @@ esp_err_t status_handler(httpd_req_t* r) {
         "{\"pan\":%d,\"tilt\":%.1f,\"tiltTarget\":%.1f,\"tiltPwm\":%d,"
         "\"neutral\":%d,\"maxSpeed\":%d,\"deadband\":%.1f,"
         "\"dpsUp\":%.0f,\"dpsDn\":%.0f,\"driftCorr\":%.0f,"
-        "\"calMode\":%s,\"tcalSpeed\":%d,"
+        "\"calMode\":%s,"
         "\"tcalActive\":%s,\"tcalDone\":%s,\"tcalElapsedMs\":%lu,"
         "\"tcalStartAngle\":%.1f,\"tcalEstDeg\":%.1f,"
         "\"heap\":%lu,\"rssi\":%d}",
         currentPan, virtualTiltAngle, tiltTargetAngle, currentTiltPwm,
         tiltCfg.neutral, tiltCfg.maxSpeed, tiltCfg.deadband,
         tiltCfg.dpsCamUp, tiltCfg.dpsCamDn, tiltCfg.driftCorr,
-        calMode ? "true" : "false", tcalSpeed,
+        calMode ? "true" : "false",
         tcalActive ? "true" : "false",
         tcalDone ? "true" : "false",
         (unsigned long)tcalElapsedMs,
@@ -412,18 +412,16 @@ void parseCommand(const char* cmd) {
     }
 
     // TSET:N:<neutral>;S:<maxSpeed>;U:<dpsUp>;D:<dpsDn>;DB:<deadband>;DC:<driftCorr>
-    // TS:<tcalSpeed> — set separate TCAL test speed
     if (strstr(cmd, "TSET:") != NULL) {
         if ((ptr = strstr(cmd, "N:")) != NULL)  tiltCfg.neutral   = constrain(atoi(ptr + 2), 70, 110);
         if ((ptr = strstr(cmd, "S:")) != NULL)  tiltCfg.maxSpeed  = constrain(atoi(ptr + 2), 10, 90);
-        if ((ptr = strstr(cmd, "U:")) != NULL)  tiltCfg.dpsCamUp  = constrain(atof(ptr + 2), 10.0f, 200.0f);
-        if ((ptr = strstr(cmd, "D:")) != NULL)  tiltCfg.dpsCamDn  = constrain(atof(ptr + 2), 10.0f, 200.0f);
+        if ((ptr = strstr(cmd, "U:")) != NULL)  tiltCfg.dpsCamUp  = constrain(atof(ptr + 2), 10.0f, 500.0f);
+        if ((ptr = strstr(cmd, "D:")) != NULL)  tiltCfg.dpsCamDn  = constrain(atof(ptr + 2), 10.0f, 500.0f);
         if ((ptr = strstr(cmd, "DB:")) != NULL) tiltCfg.deadband  = constrain(atof(ptr + 3), 1.0f, 20.0f);
         if ((ptr = strstr(cmd, "DC:")) != NULL) tiltCfg.driftCorr = constrain(atof(ptr + 3), 0.0f, 100.0f);
-        if ((ptr = strstr(cmd, "TS:")) != NULL) tcalSpeed         = constrain(atoi(ptr + 3), 5, 60);
-        Serial.printf("TSET: N=%d S=%d U=%.0f D=%.0f DB=%.1f DC=%.0f TS=%d\n",
+        Serial.printf("TSET: N=%d S=%d U=%.0f D=%.0f DB=%.1f DC=%.0f\n",
             tiltCfg.neutral, tiltCfg.maxSpeed, tiltCfg.dpsCamUp, tiltCfg.dpsCamDn,
-            tiltCfg.deadband, tiltCfg.driftCorr, tcalSpeed);
+            tiltCfg.deadband, tiltCfg.driftCorr);
     }
 
     // TSAVE — persist to NVS
@@ -432,9 +430,8 @@ void parseCommand(const char* cmd) {
     }
 
     // TCAL:UP[:ms] / TCAL:DN[:ms] / TCAL:STOP
-    // Uses tcalSpeed (NOT maxSpeed) for safe calibration sweeps
-    // Estimates angle using current dps, auto-stops at TCAL_MAX_DEGREES
-    // Optional duration: TCAL:UP:750 → 750ms test
+    // Runs at current maxSpeed. Safety: auto-stops at TCAL_MAX_DEGREES (60°)
+    // dps calibration: test uses same speed as normal operation → dps = degrees / time
     if ((ptr = strstr(cmd, "TCAL:")) != NULL) {
         char dir[8] = {0};
         int durationArg = 0;
@@ -449,7 +446,7 @@ void parseCommand(const char* cmd) {
             tcalStartMs = millis();
             calMode = true;
             Serial.printf("TCAL UP: start=%.1f speed=%d dur=%lums\n",
-                tcalStartAngle, tcalSpeed, (unsigned long)tcalDurationMs);
+                tcalStartAngle, tiltCfg.maxSpeed, (unsigned long)tcalDurationMs);
         } else if (strcmp(dir, "DN") == 0) {
             tcalActive = true; tcalDone = false;
             tcalDirection = +1;
@@ -458,7 +455,7 @@ void parseCommand(const char* cmd) {
             tcalStartMs = millis();
             calMode = true;
             Serial.printf("TCAL DN: start=%.1f speed=%d dur=%lums\n",
-                tcalStartAngle, tcalSpeed, (unsigned long)tcalDurationMs);
+                tcalStartAngle, tiltCfg.maxSpeed, (unsigned long)tcalDurationMs);
         } else if (strcmp(dir, "STOP") == 0 || strcmp(dir, "STO") == 0) {
             tcalActive = false;
             servoTilt.write(tiltCfg.neutral);
@@ -502,37 +499,35 @@ void updateServos() {
     if (dt <= 0 || dt > 0.5f) dt = 0.01f;
 
     // ── TCAL test sweep mode ────────────────────────────────────────
-    // Uses tcalSpeed (NOT maxSpeed) for safe calibration
+    // Runs at maxSpeed (same as normal operation) for accurate dps calibration
     // Estimates angle from current dps, auto-stops at TCAL_MAX_DEGREES
     if (tcalActive) {
-        // Estimate how far we've traveled (for safety auto-stop)
+        // Estimate travel for safety auto-stop (uses current dps at full speed)
         float dps = (tcalDirection > 0) ? tiltCfg.dpsCamDn : tiltCfg.dpsCamUp;
-        float speedFrac = (float)tcalSpeed / (float)tiltCfg.maxSpeed;
-        tcalEstimatedAngle += fabsf(dps * speedFrac * dt);
+        tcalEstimatedAngle += fabsf(dps * dt);
 
         bool timeUp = (now - tcalStartMs >= tcalDurationMs);
         bool angleLimit = (tcalEstimatedAngle >= TCAL_MAX_DEGREES);
 
         if (timeUp || angleLimit) {
-            // Test done — stop servo, exit calMode
             servoTilt.write(tiltCfg.neutral);
             currentTiltPwm = tiltCfg.neutral;
             tcalActive = false;
             tcalDone = true;
             calMode = false;  // resume normal PAN/TILT control
             tcalElapsedMs = now - tcalStartMs;
-            tiltTargetAngle = virtualTiltAngle;  // freeze position
-            Serial.printf("TCAL done: %lums est=%.1f° %s (virtual unchanged at %.1f°)\n",
+            tiltTargetAngle = virtualTiltAngle;
+            Serial.printf("TCAL done: %lums est=%.1f° %s (virtual=%.1f°)\n",
                 (unsigned long)tcalElapsedMs, tcalEstimatedAngle,
                 angleLimit ? "ANGLE_LIMIT" : "TIME_UP", virtualTiltAngle);
         } else {
-            // Move at tcalSpeed (not maxSpeed!)
-            int speed = tcalDirection * tcalSpeed;
+            // Move at maxSpeed
+            int speed = tcalDirection * tiltCfg.maxSpeed;
             int pwm = tiltPwm(speed);
             servoTilt.write(pwm);
             currentTiltPwm = pwm;
         }
-        return;  // skip normal control during TCAL
+        return;
     }
 
     // ── Normal tilt control ─────────────────────────────────────────

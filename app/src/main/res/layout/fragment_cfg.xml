@@ -260,7 +260,7 @@
         </LinearLayout>
         <SeekBar android:id="@+id/sb_tp_dps_up"
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:min="10" android:max="200" android:progress="70"
+            android:min="10" android:max="500" android:progress="70"
             android:layout_marginBottom="8dp" />
 
         <!-- DPS Camera Down -->
@@ -274,7 +274,7 @@
         </LinearLayout>
         <SeekBar android:id="@+id/sb_tp_dps_dn"
             android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:min="10" android:max="200" android:progress="90"
+            android:min="10" android:max="500" android:progress="90"
             android:layout_marginBottom="8dp" />
 
         <!-- Deadband -->
