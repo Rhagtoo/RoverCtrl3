@@ -111,7 +111,9 @@ class ObjectTracker(
     init {
         val opts = Interpreter.Options().apply {
             numThreads = 4
-            if (useGpu) {
+            // YOLO26 models are incompatible with NNAPI (ANEURALNETWORKS_BAD_DATA)
+            val skipDelegates = modelFile.contains("yolo26", ignoreCase = true)
+            if (useGpu && !skipDelegates) {
                 var delegateSet = false
                 try {
                     val nnapiDelegate = org.tensorflow.lite.nnapi.NnApiDelegate()
@@ -128,6 +130,10 @@ class ObjectTracker(
                         Log.i(TAG, "Using CPU (4 threads)")
                     }
                 }
+            } else if (skipDelegates) {
+                Log.i(TAG, "YOLO26 model detected, skipping NNAPI/GPU delegates (CPU only)")
+            } else {
+                Log.i(TAG, "Using CPU (4 threads)")
             }
         }
 
