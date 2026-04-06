@@ -346,7 +346,15 @@ class ObjectTracker(
         val numBoxes  = if (isTransposed) dim1 else dim2
         val numAttrs  = if (isTransposed) dim2 else dim1
 
-        if (numAttrs < 84) { Log.w(TAG, "Unexpected output attrs: $numAttrs"); return null }
+        Log.d(TAG, "bestBox shape: $dim1 x $dim2, numAttrs=$numAttrs, numBoxes=$numBoxes")
+
+        // Determine model type based on numAttrs
+        val isYolo26 = numAttrs == 6 || numAttrs == 85  // 6: x1,y1,x2,y2,conf,class; 85: cx,cy,w,h,conf + 80 classes
+        val isYoloV8 = numAttrs == 84 || numAttrs == 85 // 84: cx,cy,w,h + 80 classes
+        if (!isYoloV8 && !isYolo26) {
+            Log.w(TAG, "Unexpected output attrs: $numAttrs, shape: $dim1 x $dim2")
+            // Fallback: try to treat as YOLO26 with 6 attrs
+        }
 
         var maxCoord = 0f
         for (j in 0 until minOf(50, numBoxes)) {
@@ -355,32 +363,59 @@ class ObjectTracker(
             maxCoord = maxOf(maxCoord, cx, cy)
         }
         val scale = if (maxCoord > 2.0f) modelInputSize.toFloat() else 1.0f
+        Log.d(TAG, "maxCoord=$maxCoord, scale=$scale")
 
+        // Collect detections
         val boxes = mutableListOf<Box>()
 
         for (j in 0 until numBoxes) {
+            // Extract coordinates and class scores based on model type
             val cx: Float; val cy: Float; val w: Float; val h: Float
-            if (isTransposed) {
-                cx = out[j][0]; cy = out[j][1]; w = out[j][2]; h = out[j][3]
-            } else {
-                cx = out[0][j]; cy = out[1][j]; w = out[2][j]; h = out[3][j]
-            }
-
             var maxScore = 0f; var maxCls = 0
-            for (c in 0 until NUM_CLASSES) {
-                val s = if (isTransposed) out[j][4 + c] else out[4 + c][j]
-                if (s > maxScore) { maxScore = s; maxCls = c }
+
+            if (isYoloV8) {
+                // YOLOv8 format: [cx, cy, w, h, class0, class1, ...] (84 attrs) or [..., conf] (85 attrs)
+                if (isTransposed) {
+                    cx = out[j][0]; cy = out[j][1]; w = out[j][2]; h = out[j][3]
+                } else {
+                    cx = out[0][j]; cy = out[1][j]; w = out[2][j]; h = out[3][j]
+                }
+                for (c in 0 until NUM_CLASSES) {
+                    val s = if (isTransposed) out[j][4 + c] else out[4 + c][j]
+                    if (s > maxScore) { maxScore = s; maxCls = c }
+                }
+            } else {
+                // Assume YOLO26 format with 6 or 85 attrs
+                // If numAttrs == 6: [x1, y1, x2, y2, conf, class]
+                // If numAttrs == 85: [cx, cy, w, h, conf, class0, class1, ...] (unlikely)
+                // We assume the first 4 values are bounding box coordinates.
+                // For simplicity, treat as x1,y1,x2,y2 and convert to cx,cy,w,h.
+                val x1: Float; val y1: Float; val x2: Float; val y2: Float
+                if (isTransposed) {
+                    x1 = out[j][0]; y1 = out[j][1]; x2 = out[j][2]; y2 = out[j][3]
+                    maxScore = out[j][4]
+                    maxCls   = out[j][5].toInt()
+                } else {
+                    x1 = out[0][j]; y1 = out[1][j]; x2 = out[2][j]; y2 = out[3][j]
+                    maxScore = out[4][j]
+                    maxCls   = out[5][j].toInt()
+                }
+                cx = (x1 + x2) / 2f
+                cy = (y1 + y2) / 2f
+                w  = x2 - x1
+                h  = y2 - y1
             }
 
+            // Apply target class filter (if any)
             if (targetClass >= 0) {
-                val targetScore = if (isTransposed) out[j][4 + targetClass] else out[4 + targetClass][j]
-                if (targetScore < confThresh) continue
-                maxScore = targetScore
-                maxCls = targetClass
+                // For YOLO26 we already have class id; check if matches targetClass
+                if (maxCls != targetClass) continue
+                // Confidence already in maxScore
             } else {
                 if (maxScore < confThresh) continue
             }
 
+            // Filter classes: only person (0) and cat (15) allowed
             if (maxCls != 0 && maxCls != 15) continue
 
             boxes += Box(cx / scale, cy / scale, w / scale, h / scale, maxScore, maxCls)
@@ -388,20 +423,31 @@ class ObjectTracker(
 
         if (boxes.isEmpty()) return null
 
-        val sorted = boxes.sortedByDescending { it.score }.toMutableList()
-        val kept   = mutableListOf<Box>()
-        while (sorted.isNotEmpty()) {
-            val cur = sorted.removeFirst()
-            kept += cur
-            sorted.removeIf { iou(cur, it) > iouThresh }
+        // For YOLO26, NMS is not needed (model is NMS-free). Just pick highest confidence.
+        // For YOLOv8, perform NMS as before.
+        if (isYoloV8) {
+            val sorted = boxes.sortedByDescending { it.score }.toMutableList()
+            val kept   = mutableListOf<Box>()
+            while (sorted.isNotEmpty()) {
+                val cur = sorted.removeFirst()
+                kept += cur
+                sorted.removeIf { iou(cur, it) > iouThresh }
+            }
+            val b = kept.first()
+            return DetectionResult(
+                cx = b.cx, cy = b.cy, w = b.w, h = b.h,
+                confidence = b.score,
+                label = COCO_LABELS.getOrElse(b.classId) { "cls${b.classId}" }
+            )
+        } else {
+            // YOLO26: pick highest confidence detection
+            val b = boxes.maxByOrNull { it.score } ?: return null
+            return DetectionResult(
+                cx = b.cx, cy = b.cy, w = b.w, h = b.h,
+                confidence = b.score,
+                label = COCO_LABELS.getOrElse(b.classId) { "cls${b.classId}" }
+            )
         }
-
-        val b = kept.first()
-        return DetectionResult(
-            cx = b.cx, cy = b.cy, w = b.w, h = b.h,
-            confidence = b.score,
-            label = COCO_LABELS.getOrElse(b.classId) { "cls${b.classId}" }
-        )
     }
 
     private fun iou(a: Box, b: Box): Float {
