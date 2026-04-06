@@ -10,7 +10,11 @@ data class AppSettings(
     val driveSpeedSens: Float = 1.0f,  // 0.1..2.0  множитель скорости движения
     val driveSteerSens: Float = 1.0f,  // 0.1..2.0  множитель руления
     val camPanSens:     Float = 1.0f,  // 0.1..2.0  множитель пана камеры
-    val camTiltSens:    Float = 1.0f   // 0.1..2.0  множитель тилта камеры
+    val camTiltSens:    Float = 1.0f,  // 0.1..2.0  множитель тилта камеры
+    // Tracking tuning (ObjectTracker anti-jitter)
+    val trackDeadzone:  Float = 0.04f, // 0.01..0.15 center deadzone (fraction of frame)
+    val trackExpo:      Float = 2.0f,  // 1.0..3.0  exponential curve power
+    val trackRateLimit: Float = 8.0f   // 2..30     max command change per frame
 ) {
     companion object {
         private const val PREFS          = "app_settings"
@@ -18,6 +22,9 @@ data class AppSettings(
         private const val KEY_DRIVE_STR  = "drive_steer_sens"
         private const val KEY_CAM_PAN    = "cam_pan_sens"
         private const val KEY_CAM_TILT   = "cam_tilt_sens"
+        private const val KEY_TRACK_DZ   = "track_deadzone"
+        private const val KEY_TRACK_EXPO = "track_expo"
+        private const val KEY_TRACK_RATE = "track_rate_limit"
 
         fun load(ctx: Context): AppSettings {
             val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -25,7 +32,10 @@ data class AppSettings(
                 driveSpeedSens = p.getFloat(KEY_DRIVE_SPD, 1.0f),
                 driveSteerSens = p.getFloat(KEY_DRIVE_STR, 1.0f),
                 camPanSens     = p.getFloat(KEY_CAM_PAN,   1.0f),
-                camTiltSens    = p.getFloat(KEY_CAM_TILT,  1.0f)
+                camTiltSens    = p.getFloat(KEY_CAM_TILT,  1.0f),
+                trackDeadzone  = p.getFloat(KEY_TRACK_DZ,  0.04f),
+                trackExpo      = p.getFloat(KEY_TRACK_EXPO, 2.0f),
+                trackRateLimit = p.getFloat(KEY_TRACK_RATE, 8.0f)
             )
         }
 
@@ -35,6 +45,9 @@ data class AppSettings(
                 .putFloat(KEY_DRIVE_STR, s.driveSteerSens)
                 .putFloat(KEY_CAM_PAN,   s.camPanSens)
                 .putFloat(KEY_CAM_TILT,  s.camTiltSens)
+                .putFloat(KEY_TRACK_DZ,  s.trackDeadzone)
+                .putFloat(KEY_TRACK_EXPO, s.trackExpo)
+                .putFloat(KEY_TRACK_RATE, s.trackRateLimit)
                 .apply()
         }
 

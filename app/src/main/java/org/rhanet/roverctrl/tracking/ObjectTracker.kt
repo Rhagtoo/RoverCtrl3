@@ -23,7 +23,8 @@ import java.nio.channels.FileChannel
 
 class ObjectTracker(
     context:          Context,
-    modelFile:        String = "yolov8n.tflite",
+    modelFile:        String = "yolov8n.tflite",      // float32 fallback
+    private val int8ModelFile: String = "yolov8n_int8.tflite",  // preferred INT8
     private val targetClass: Int = -1,
     private val confThresh:  Float = 0.25f,
     private val iouThresh:   Float = 0.45f,
@@ -43,16 +44,21 @@ class ObjectTracker(
     private val minTrackingConfidence = 0.1f
 
     // ── Anti-jitter: deadzone + exponential scaling + rate limiting ──
-    // Deadzone: object within center ±4% of frame → no servo command
-    private val DEADZONE = 0.04f
-    // Exponential scaling: small errors → tiny commands, big errors → proportional
-    // output = sign(err) * |err|^EXPO_POWER * EXPO_SCALE
-    private val EXPO_POWER = 2.0f     // quadratic: 5% error → 0.25%, 20% error → 4%
-    private val EXPO_SCALE = 400f     // compensate for quadratic shrinkage at large errors
-    // Rate limiter: max change per frame (prevents ramp-up jerks)
-    private val MAX_DELTA_PER_FRAME = 8f
+    // Configurable via AppSettings sliders
+    private var DEADZONE = 0.04f
+    private var EXPO_POWER = 2.0f
+    private val EXPO_SCALE = 400f     // fixed: compensates quadratic shrinkage
+    private var MAX_DELTA_PER_FRAME = 8f
     private var lastPanOutput = 0f
     private var lastTiltOutput = 0f
+
+    /** Update tracking tuning from AppSettings (called from VideoFragment on settings change) */
+    fun updateTrackingTuning(deadzone: Float, expo: Float, rateLimit: Float) {
+        DEADZONE = deadzone.coerceIn(0.01f, 0.15f)
+        EXPO_POWER = expo.coerceIn(1.0f, 3.0f)
+        MAX_DELTA_PER_FRAME = rateLimit.coerceIn(2f, 30f)
+        Log.d(TAG, "Tuning: dz=$DEADZONE expo=$EXPO_POWER rate=$MAX_DELTA_PER_FRAME")
+    }
 
     private var cachedOutputBuffer: Array<Array<FloatArray>>? = null
     @Volatile private var closed = false
@@ -99,18 +105,20 @@ class ObjectTracker(
     private var inputNchw: Boolean = false
     private var modelInputSize: Int = INPUT_SIZE
 
+    // Whether model expects uint8 input (INT8 quantized) vs float32
+    private var modelIsInt8 = false
+
     init {
         val opts = Interpreter.Options().apply {
             numThreads = 4
             if (useGpu) {
-                // v2.8: try NNAPI first (Hexagon DSP on Snapdragon), then GPU, then CPU
                 var delegateSet = false
                 try {
                     val nnapiDelegate = org.tensorflow.lite.nnapi.NnApiDelegate()
                     addDelegate(nnapiDelegate)
                     delegateSet = true
                     Log.i(TAG, "Using NNAPI delegate")
-                } catch (_: Throwable) { /* NNAPI not available */ }
+                } catch (_: Throwable) {}
                 if (!delegateSet) {
                     try {
                         val gpuDelegate = org.tensorflow.lite.gpu.GpuDelegate()
@@ -122,14 +130,28 @@ class ObjectTracker(
                 }
             }
         }
-        val fd = context.assets.openFd(modelFile)
+
+        // Try INT8 model first (2-3× faster on NNAPI), fall back to float32
+        val actualModelFile = try {
+            context.assets.openFd(int8ModelFile).close()
+            Log.i(TAG, "Found INT8 model: $int8ModelFile")
+            int8ModelFile
+        } catch (_: Throwable) {
+            Log.i(TAG, "INT8 model not found, using float32: $modelFile")
+            modelFile
+        }
+
+        val fd = context.assets.openFd(actualModelFile)
         val model = FileInputStream(fd.fileDescriptor).channel.map(
             FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength)
         interp = Interpreter(model, opts)
 
         val inShape  = interp.getInputTensor(0).shape()
         val outShape = interp.getOutputTensor(0).shape()
-        Log.i(TAG, "Input: ${inShape.contentToString()}, Output: ${outShape.contentToString()}")
+        val inType   = interp.getInputTensor(0).dataType()
+        modelIsInt8  = (inType.name == "UINT8")
+        Log.i(TAG, "Model: $actualModelFile, Input: ${inShape.contentToString()} $inType, Output: ${outShape.contentToString()}")
+        Log.i(TAG, "INT8 mode: $modelIsInt8")
 
         if (inShape.size == 4) {
             inputNchw = (inShape[1] == 3 && inShape[2] > 3)
@@ -142,10 +164,12 @@ class ObjectTracker(
 
         // Pre-allocate reusable buffers
         val sz = modelInputSize
-        cachedInputBuffer = ByteBuffer.allocateDirect(4 * sz * sz * 3).order(ByteOrder.nativeOrder())
+        val bytesPerPixel = if (modelIsInt8) 1 else 4  // uint8=1B, float32=4B
+        cachedInputBuffer = ByteBuffer.allocateDirect(bytesPerPixel * sz * sz * 3).order(ByteOrder.nativeOrder())
         cachedPixels = IntArray(sz * sz)
 
-        Log.i(TAG, "Model: ${if (inputNchw) "NCHW" else "NHWC"}, size=$modelInputSize")
+        Log.i(TAG, "Format: ${if (inputNchw) "NCHW" else "NHWC"}, size=$modelInputSize, " +
+                   "buf=${bytesPerPixel * sz * sz * 3 / 1024}KB")
     }
 
     data class TrackResult(

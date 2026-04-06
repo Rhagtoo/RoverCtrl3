@@ -520,5 +520,71 @@
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:max="19" android:progress="9" android:layout_marginBottom="8dp" />
 
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- ── TRACKING TUNING (YOLO anti-jitter) ─────────────────────── -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="#333333" android:layout_marginTop="12dp" android:layout_marginBottom="12dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="TRACKING TUNING"
+            android:textColor="#E040FB"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Adjust YOLO tracking smoothness. Takes effect immediately."
+            android:textColor="#888888"
+            android:textSize="10sp"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Deadzone -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="2dp">
+            <TextView android:layout_width="100dp" android:layout_height="wrap_content"
+                android:text="Deadzone" android:textColor="#AAAAAA" android:textSize="12sp" />
+            <TextView android:id="@+id/tv_trk_dz_val" android:layout_width="40dp"
+                android:layout_height="wrap_content" android:text="4%" android:textColor="#FFFFFF"
+                android:textSize="12sp" android:gravity="end" />
+        </LinearLayout>
+        <SeekBar android:id="@+id/sb_trk_deadzone"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:min="1" android:max="15" android:progress="4"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Expo curve -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="2dp">
+            <TextView android:layout_width="100dp" android:layout_height="wrap_content"
+                android:text="Expo curve" android:textColor="#AAAAAA" android:textSize="12sp" />
+            <TextView android:id="@+id/tv_trk_expo_val" android:layout_width="40dp"
+                android:layout_height="wrap_content" android:text="2.0" android:textColor="#FFFFFF"
+                android:textSize="12sp" android:gravity="end" />
+        </LinearLayout>
+        <SeekBar android:id="@+id/sb_trk_expo"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:min="10" android:max="30" android:progress="20"
+            android:layout_marginBottom="8dp" />
+
+        <!-- Rate limit -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="2dp">
+            <TextView android:layout_width="100dp" android:layout_height="wrap_content"
+                android:text="Rate limit" android:textColor="#AAAAAA" android:textSize="12sp" />
+            <TextView android:id="@+id/tv_trk_rate_val" android:layout_width="40dp"
+                android:layout_height="wrap_content" android:text="8" android:textColor="#FFFFFF"
+                android:textSize="12sp" android:gravity="end" />
+        </LinearLayout>
+        <SeekBar android:id="@+id/sb_trk_rate"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:min="2" android:max="30" android:progress="8"
+            android:layout_marginBottom="8dp" />
+
     </LinearLayout>
 </ScrollView>

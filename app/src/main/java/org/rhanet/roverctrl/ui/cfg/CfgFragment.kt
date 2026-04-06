@@ -80,6 +80,14 @@ class CfgFragment : Fragment() {
     private lateinit var tvCamPanVal:     TextView
     private lateinit var tvCamTiltVal:    TextView
 
+    // Tracking tuning
+    private lateinit var sbTrkDeadzone:  SeekBar
+    private lateinit var sbTrkExpo:      SeekBar
+    private lateinit var sbTrkRate:      SeekBar
+    private lateinit var tvTrkDzVal:     TextView
+    private lateinit var tvTrkExpoVal:   TextView
+    private lateinit var tvTrkRateVal:   TextView
+
     // Tilt calibration (VCAL)
     private lateinit var tvTiltStatus: TextView
     private lateinit var etVcalAngle: EditText
@@ -158,6 +166,14 @@ class CfgFragment : Fragment() {
         tvDriveSteerVal = view.findViewById(R.id.tv_drive_steer_val)
         tvCamPanVal     = view.findViewById(R.id.tv_cam_pan_val)
         tvCamTiltVal    = view.findViewById(R.id.tv_cam_tilt_val)
+
+        // Tracking tuning
+        sbTrkDeadzone   = view.findViewById(R.id.sb_trk_deadzone)
+        sbTrkExpo       = view.findViewById(R.id.sb_trk_expo)
+        sbTrkRate       = view.findViewById(R.id.sb_trk_rate)
+        tvTrkDzVal      = view.findViewById(R.id.tv_trk_dz_val)
+        tvTrkExpoVal    = view.findViewById(R.id.tv_trk_expo_val)
+        tvTrkRateVal    = view.findViewById(R.id.tv_trk_rate_val)
 
         // Tilt calibration (VCAL)
         tvTiltStatus = view.findViewById(R.id.tv_tilt_status)
@@ -620,6 +636,13 @@ class CfgFragment : Fragment() {
         tvDriveSteerVal.text = AppSettings.format(s.driveSteerSens)
         tvCamPanVal.text     = AppSettings.format(s.camPanSens)
         tvCamTiltVal.text    = AppSettings.format(s.camTiltSens)
+        // Tracking tuning
+        sbTrkDeadzone.progress = (s.trackDeadzone * 100).toInt()  // 0.04 → 4
+        sbTrkExpo.progress     = (s.trackExpo * 10).toInt()       // 2.0 → 20
+        sbTrkRate.progress     = s.trackRateLimit.toInt()          // 8 → 8
+        tvTrkDzVal.text  = "${sbTrkDeadzone.progress}%"
+        tvTrkExpoVal.text = String.format("%.1f", s.trackExpo)
+        tvTrkRateVal.text = sbTrkRate.progress.toString()
     }
 
     private fun setupSensitivitySliders() {
@@ -639,6 +662,32 @@ class CfgFragment : Fragment() {
         sbDriveSteer.setOnSeekBarChangeListener(makeListener(tvDriveSteerVal) {})
         sbCamPan.setOnSeekBarChangeListener(makeListener(tvCamPanVal) {})
         sbCamTilt.setOnSeekBarChangeListener(makeListener(tvCamTiltVal) {})
+
+        // Tracking tuning sliders
+        sbTrkDeadzone.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
+                tvTrkDzVal.text = "$p%"
+                if (fromUser) saveSensitivity()
+            }
+            override fun onStartTrackingTouch(sb: SeekBar) {}
+            override fun onStopTrackingTouch(sb: SeekBar) {}
+        })
+        sbTrkExpo.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
+                tvTrkExpoVal.text = String.format("%.1f", p / 10f)
+                if (fromUser) saveSensitivity()
+            }
+            override fun onStartTrackingTouch(sb: SeekBar) {}
+            override fun onStopTrackingTouch(sb: SeekBar) {}
+        })
+        sbTrkRate.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) {
+                tvTrkRateVal.text = p.toString()
+                if (fromUser) saveSensitivity()
+            }
+            override fun onStartTrackingTouch(sb: SeekBar) {}
+            override fun onStopTrackingTouch(sb: SeekBar) {}
+        })
     }
 
     private fun saveSensitivity() {
@@ -646,7 +695,10 @@ class CfgFragment : Fragment() {
             driveSpeedSens = AppSettings.progressToSens(sbDriveSpeed.progress),
             driveSteerSens = AppSettings.progressToSens(sbDriveSteer.progress),
             camPanSens     = AppSettings.progressToSens(sbCamPan.progress),
-            camTiltSens    = AppSettings.progressToSens(sbCamTilt.progress)
+            camTiltSens    = AppSettings.progressToSens(sbCamTilt.progress),
+            trackDeadzone  = sbTrkDeadzone.progress / 100f,   // 4 → 0.04
+            trackExpo      = sbTrkExpo.progress / 10f,        // 20 → 2.0
+            trackRateLimit = sbTrkRate.progress.toFloat()      // 8 → 8.0
         )
         vm.updateSensitivity(requireContext(), s)
     }

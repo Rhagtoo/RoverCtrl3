@@ -182,6 +182,8 @@ class VideoFragment : Fragment() {
             vm.sensitivity.collectLatest { settings ->
                 if (objectTracker != null && vm.trackMode.value == TrackingMode.OBJECT_TRACK) {
                     objectTracker?.updateSensitivity(settings.camPanSens, settings.camTiltSens)
+                    objectTracker?.updateTrackingTuning(
+                        settings.trackDeadzone, settings.trackExpo, settings.trackRateLimit)
                 }
             }
         }
@@ -596,11 +598,19 @@ class VideoFragment : Fragment() {
                 if (objectTracker == null) {
                     try {
                         val settings = vm.sensitivity.value
+                        // Try INT8 quantized model first (2-3× faster on NNAPI)
+                        val modelFile = if (requireContext().assets.list("")
+                                ?.contains("yolov8n_int8.tflite") == true)
+                            "yolov8n_int8.tflite" else "yolov8n.tflite"
                         objectTracker = ObjectTracker(
                             context = requireContext(),
+                            modelFile = modelFile,
                             panSensitivity = settings.camPanSens,
                             tiltSensitivity = settings.camTiltSens
                         )
+                        objectTracker?.updateTrackingTuning(
+                            settings.trackDeadzone, settings.trackExpo, settings.trackRateLimit)
+                        Log.i(TAG, "YOLO model: $modelFile")
                     } catch (e: Throwable) {
                         Toast.makeText(requireContext(), "YOLO: ${e.message}", Toast.LENGTH_LONG).show()
                         vm.setTrackMode(TrackingMode.MANUAL)
@@ -609,6 +619,8 @@ class VideoFragment : Fragment() {
                 } else {
                     val settings = vm.sensitivity.value
                     objectTracker?.updateSensitivity(settings.camPanSens, settings.camTiltSens)
+                    objectTracker?.updateTrackingTuning(
+                        settings.trackDeadzone, settings.trackExpo, settings.trackRateLimit)
                 }
             }
         }

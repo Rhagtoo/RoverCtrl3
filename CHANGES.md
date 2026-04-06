@@ -1,54 +1,65 @@
-# v2.9 — Safe Tilt Calibration
+# v3.0 — Live Tracking Tuning + YOLO INT8 Support
 
 Target branch: bugfixes-2026-04-05
 
-## Проблема
-speed=40, test 2s → камера делает 270° (три четверти оборота),
-после Apply виртуальный угол уходит в 0, при следующем Test Down
-система "компенсирует" и хуярит на полной скорости наматывая провода.
+## 1. Live Tracking Tuning Sliders
 
-## Корневые причины
-1. TCAL использовал maxSpeed (40-60 PWM) — слишком быстро для CR серво
-2. Длительность 2с — слишком долго при высокой скорости
-3. Нет ограничения максимального угла за один тест
-4. PAN/TILT команды продолжали приходить во время калибровки
+### AppSettings.kt
+- Added: trackDeadzone (0.01–0.15), trackExpo (1.0–3.0), trackRateLimit (2–30)
+- Persisted in SharedPreferences, loaded at startup
 
-## Исправления
+### ObjectTracker.kt
+- Deadzone/expo/rateLimit now configurable (were hardcoded constants)
+- New method: updateTrackingTuning(deadzone, expo, rateLimit)
+- Settings take effect immediately without app restart
 
-### firmware/turret_client.ino
-- **tcalSpeed = 20** — отдельная безопасная скорость для калибровки (НЕ maxSpeed!)
-- **tcalDurationMs = 500** — default 0.5s (было 2s)
-- **TCAL_MAX_DEGREES = 60** — auto-stop если оценочный угол превышен
-- **calMode** — блокирует PAN/TILT команды во время калибровки
-- Парсит длительность из команды: `TCAL:UP:750` → 750ms тест
-- VCAL принудительно ставит servo=neutral (race condition fix)
+### CfgFragment.kt + fragment_cfg.xml
+- New section "TRACKING TUNING" with three sliders:
+  - Deadzone (1–15%): center dead area, no servo movement
+  - Expo curve (1.0–3.0): 1=linear, 2=quadratic, 3=cubic
+  - Rate limit (2–30): max command change per frame
+- Changes saved to SharedPreferences and pushed to ObjectTracker in real-time
 
-### app/.../network/CommandSender.kt
-- sendTcalUp(durationMs) / sendTcalDn(durationMs) — передают длительность
-- Формат UDP: `TCAL:UP:500\n`
+### VideoFragment.kt
+- Pushes tracking tuning to ObjectTracker on settings change and on init
 
-### app/.../ui/cfg/CfgFragment.kt
-- RadioGroup: выбор длительности 0.5s / 1s / 2s
-- Default = 0.5s
-- Warning при вводе >170° ("are you sure?")
-- Показывает длительность в статусе теста
+## 2. PWM Smoothing (firmware)
 
-### app/.../res/layout/fragment_cfg.xml
-- Добавлен RadioGroup с тремя вариантами длительности
-- Кнопки Test ↑ / Test ↓ без hardcoded "2s"
-- Обновлена инструкция
+Already in v2.9 firmware — no changes needed:
+- PAN: PAN_SMOOTH_STEP=3 (max 3°/tick at 100Hz)
+- TILT: proportional speed + TILT_PWM_RAMP=5
 
-## Инструкция по калибровке
-1. Virtual = 90, камеру вперёд → Set
-2. Выбрать 0.5s, нажать Test ↑
-   → камера едет МЕДЛЕННО (speed=20) 0.5s, max 60°
-   → автостоп по времени или по углу (что раньше)
-3. Ввести реальные градусы → Apply
-4. Повторить Test ↓
-5. Save ESP → NVS
-6. ПОСЛЕ калибровки dps → выставить рабочий maxSpeed слайдером
+## 3. YOLO INT8 Support
+
+### VideoFragment.kt
+- Auto-detects yolov8n_int8.tflite in assets, falls back to yolov8n.tflite
+- Logs which model is loaded
+
+### ObjectTracker.kt
+- NNAPI delegate (try NNAPI → GPU → CPU) — already in v2.8
+- INT8 model works with same code (TFLite handles quantization transparently)
+
+### tools/export_yolo_int8.sh
+- Script to generate INT8 model: `pip install ultralytics && bash tools/export_yolo_int8.sh`
+- Produces yolov8n_int8.tflite (~4MB vs ~13MB float32)
+- Copy to app/src/main/assets/ — app auto-detects
+
+## Рекомендации по настройке
+
+### Для плавного трекинга (стационарный объект, минимум дрыганья):
+- Deadzone: 5-6%, Expo: 2.5, Rate limit: 5-6
+
+### Для быстрого трекинга (движущийся объект):
+- Deadzone: 2-3%, Expo: 1.5, Rate limit: 15-20
+
+### Дефолт (баланс):
+- Deadzone: 4%, Expo: 2.0, Rate limit: 8
 
 ## Установка
-1. Распаковать в корень репы (ветка bugfixes-2026-04-05)
-2. Прошить турель (firmware изменена!)
-3. Собрать APK
+1. Распаковать в корень репы
+2. Собрать APK
+3. (Опционально) Сгенерировать INT8 модель:
+   pip install ultralytics
+   bash tools/export_yolo_int8.sh
+   cp yolov8n_int8.tflite app/src/main/assets/
+4. Прошивка не затронута
