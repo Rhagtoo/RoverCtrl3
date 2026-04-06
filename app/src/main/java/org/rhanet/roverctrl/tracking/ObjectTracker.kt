@@ -42,6 +42,18 @@ class ObjectTracker(
     private val minDetectionConfidence = 0.3f
     private val minTrackingConfidence = 0.1f
 
+    // ── Anti-jitter: deadzone + exponential scaling + rate limiting ──
+    // Deadzone: object within center ±4% of frame → no servo command
+    private val DEADZONE = 0.04f
+    // Exponential scaling: small errors → tiny commands, big errors → proportional
+    // output = sign(err) * |err|^EXPO_POWER * EXPO_SCALE
+    private val EXPO_POWER = 2.0f     // quadratic: 5% error → 0.25%, 20% error → 4%
+    private val EXPO_SCALE = 400f     // compensate for quadratic shrinkage at large errors
+    // Rate limiter: max change per frame (prevents ramp-up jerks)
+    private val MAX_DELTA_PER_FRAME = 8f
+    private var lastPanOutput = 0f
+    private var lastTiltOutput = 0f
+
     private var cachedOutputBuffer: Array<Array<FloatArray>>? = null
     @Volatile private var closed = false
 
@@ -190,6 +202,7 @@ class ObjectTracker(
 
         val finalDetection = detection ?: run {
             pidPan.reset(); pidTilt.reset()
+            lastPanOutput = 0f; lastTiltOutput = 0f
             return TrackResult(false, 0f, 0f, null)
         }
 
@@ -205,11 +218,40 @@ class ObjectTracker(
 
         val errX = targetCx - 0.5f
         val errY = targetCy - 0.5f
-        val panRaw  = pidPan.updateWithDeadband(errX)
-        val tiltRaw = pidTilt.updateWithDeadband(errY)
 
-        val pan  = (panRaw * panSensitivity).coerceIn(-100f, 100f)
-        val tilt = (tiltRaw * tiltSensitivity).coerceIn(-100f, 100f)
+        // ── Anti-jitter pipeline: deadzone → expo scaling → PID → rate limit ──
+        val absErrX = kotlin.math.abs(errX)
+        val absErrY = kotlin.math.abs(errY)
+
+        var pan  = 0f
+        var tilt = 0f
+
+        if (absErrX > DEADZONE || absErrY > DEADZONE) {
+            // Exponential scaling: small error → tiny command, big error → proportional
+            val scaledErrX = if (absErrX > DEADZONE) {
+                val r = absErrX - DEADZONE
+                kotlin.math.sign(errX) * Math.pow(r.toDouble(), EXPO_POWER.toDouble()).toFloat() * EXPO_SCALE
+            } else 0f
+            val scaledErrY = if (absErrY > DEADZONE) {
+                val r = absErrY - DEADZONE
+                kotlin.math.sign(errY) * Math.pow(r.toDouble(), EXPO_POWER.toDouble()).toFloat() * EXPO_SCALE
+            } else 0f
+
+            val panRaw  = pidPan.update(scaledErrX)
+            val tiltRaw = pidTilt.update(scaledErrY)
+            pan  = (panRaw * panSensitivity).coerceIn(-100f, 100f)
+            tilt = (tiltRaw * tiltSensitivity).coerceIn(-100f, 100f)
+        } else {
+            // Inside deadzone — hold still, decay PID integral
+            pidPan.reset()
+            pidTilt.reset()
+        }
+
+        // Rate limiter: max ±MAX_DELTA_PER_FRAME change between frames
+        pan  = (pan.coerceIn(lastPanOutput - MAX_DELTA_PER_FRAME, lastPanOutput + MAX_DELTA_PER_FRAME))
+        tilt = (tilt.coerceIn(lastTiltOutput - MAX_DELTA_PER_FRAME, lastTiltOutput + MAX_DELTA_PER_FRAME))
+        lastPanOutput = pan
+        lastTiltOutput = tilt
 
         // v2.8: throttled logging — only every Nth detection
         detectCount++

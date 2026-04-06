@@ -66,6 +66,12 @@ const IPAddress STATIC_IP(192, 168, 4, 2), GATEWAY(192, 168, 4, 1), SUBNET(255, 
 #define TILT_MIN_ANGLE        10.0f
 #define TILT_MAX_ANGLE        170.0f
 
+// Servo mount direction: set to true if tilt moves the wrong way
+#define TILT_INVERT           true
+
+// Helper macro: applies invert before writing to CR servo
+#define tiltPwm(spd) constrain(tiltCfg.neutral + (TILT_INVERT ? -(spd) : (spd)), 0, 180)
+
 // ═══ Runtime tilt config (loaded from NVS or defaults) ═══
 struct TiltConfig {
     int   neutral;
@@ -522,7 +528,7 @@ void updateServos() {
         } else {
             // Move at tcalSpeed (not maxSpeed!)
             int speed = tcalDirection * tcalSpeed;
-            int pwm = constrain(tiltCfg.neutral + speed, 0, 180);
+            int pwm = tiltPwm(speed);
             servoTilt.write(pwm);
             currentTiltPwm = pwm;
         }
@@ -548,7 +554,7 @@ void updateServos() {
     } else {
         // Constant speed toward target
         int speed = (error > 0) ? tiltCfg.maxSpeed : -tiltCfg.maxSpeed;
-        int pwm = constrain(tiltCfg.neutral + speed, 0, 180);
+        int pwm = tiltPwm(speed);
         servoTilt.write(pwm);
         currentTiltPwm = pwm;
 
