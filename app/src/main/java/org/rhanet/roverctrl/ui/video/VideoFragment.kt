@@ -40,13 +40,16 @@ import org.rhanet.roverctrl.ui.control.JoystickView
 import androidx.navigation.fragment.findNavController
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * VideoFragment v2.4
- * - Латенси пайплайна: всегда видна (tv_latency всегда VISIBLE)
- *   Manual: показывает только FPS камеры
- *   Tracking: decode→infer→cmd задержка в мс
- * - tv_status / tv_main_source_label / tv_latency объединены в video_hud_left
+ * VideoFragment v2.8
+ *
+ * PERF changes:
+ *   - Inference gate (AtomicBoolean): prevents executor queue buildup
+ *     If inference is running, new XIAO frames are skipped instead of queued
+ *   - Dropped frames counted in latency HUD
+ *   - Reduced per-frame allocations
  */
 @androidx.camera.camera2.interop.ExperimentalCamera2Interop
 class VideoFragment : Fragment() {
@@ -57,15 +60,18 @@ class VideoFragment : Fragment() {
     private val analysisExecutor = Executors.newSingleThreadExecutor()
     private val latency = LatencyTracker(windowSize = 30)
 
+    // v2.8: inference gate — prevents queueing frames when analysis is busy
+    private val inferenceRunning = AtomicBoolean(false)
+    private var droppedAnalysisFrames = 0L
+
     private lateinit var previewView:       PreviewView
     private lateinit var overlay:           TrackingOverlayView
     private lateinit var overlayXiao:       TrackingOverlayView
     private lateinit var spinnerMode:       Spinner
     private lateinit var tvFps:             TextView
     private lateinit var tvStatus:          TextView
-    private lateinit var tvLatency:         TextView   // всегда видна
+    private lateinit var tvLatency:         TextView
 
-    // PiP + Swap
     private lateinit var pipContainer:      FrameLayout
     private lateinit var ivTurretPip:       ImageView
     private lateinit var tvTurretFps:       TextView
@@ -75,7 +81,6 @@ class VideoFragment : Fragment() {
     private lateinit var ivXiaoMain:        ImageView
     private lateinit var tvMainSourceLabel: TextView
 
-    // Overlay controls
     private lateinit var joystickDrive:     JoystickView
     private lateinit var joystickCam:       JoystickView
     private lateinit var tvDriveLabel:      TextView
@@ -90,12 +95,9 @@ class VideoFragment : Fragment() {
     private var cameraProvider: ProcessCameraProvider? = null
     private var xiaoAnalysisJob: Job? = null
 
-    // FPS счётчик для камеры
     private var frameCount = 0
     private var lastFpsTime = System.currentTimeMillis()
     private var lastCameraFps = 0f
-
-    // Латенси: обновляем не чаще раза в 500мс
     private var lastLatencyUpdate = 0L
 
     private val permLauncher = registerForActivityResult(
@@ -130,7 +132,6 @@ class VideoFragment : Fragment() {
         tvCamLabel         = view.findViewById(R.id.tv_cam_label_video)
         btnLaserVideo      = view.findViewById(R.id.btn_laser_video)
 
-        // edge-to-edge: insets для верхней панели и правого джойстика
         val toolbarVideo = view.findViewById<View>(R.id.toolbar_video)
         ViewCompat.setOnApplyWindowInsetsListener(toolbarVideo) { v, insets ->
             val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -143,7 +144,6 @@ class VideoFragment : Fragment() {
             insets
         }
 
-        // Латенси всегда видна — начальное состояние
         tvLatency.text = "-- ms"
         tvLatency.visibility = View.VISIBLE
 
@@ -170,7 +170,6 @@ class VideoFragment : Fragment() {
                     TrackingMode.OBJECT_TRACK -> "YOLO"
                     TrackingMode.GYRO_TILT    -> "Gyro"
                 }
-                // В Manual латенси показывает только FPS камеры
                 if (mode == TrackingMode.MANUAL || mode == TrackingMode.GYRO_TILT) {
                     updateLatencyManual()
                 }
@@ -178,16 +177,12 @@ class VideoFragment : Fragment() {
                 updateXiaoAnalysis()
             }
         }
-        
-        // Observe sensitivity changes
+
         viewLifecycleOwner.lifecycleScope.launch {
             vm.sensitivity.collectLatest { settings ->
-                // Update ObjectTracker sensitivity if it exists and YOLO mode is active
                 if (objectTracker != null && vm.trackMode.value == TrackingMode.OBJECT_TRACK) {
                     objectTracker?.updateSensitivity(settings.camPanSens, settings.camTiltSens)
-                    Log.d(TAG, "YOLO sensitivity updated: pan=${settings.camPanSens}, tilt=${settings.camTiltSens}")
                 }
-                // TODO: Add sensitivity support for LaserTracker
             }
         }
 
@@ -196,25 +191,15 @@ class VideoFragment : Fragment() {
         else permLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    // ── Латенси ──────────────────────────────────────────────────────────
+    // ── Latency ──────────────────────────────────────────────────────────
 
-    /**
-     * Manual / Gyro: нет inference, показываем только FPS камеры.
-     */
     private fun updateLatencyManual() {
         handler.post {
-            tvLatency.text = if (lastCameraFps > 0f)
-                "cam %.0f fps".format(lastCameraFps)
-            else "-- ms"
+            tvLatency.text = if (lastCameraFps > 0f) "fps: %.0f".format(lastCameraFps) else "--"
             tvLatency.setTextColor(0xFFAAAAAA.toInt())
         }
     }
 
-    /**
-     * Tracking: decode + inference + cmd задержка.
-     * Формат: "12 ms  · cam 60 fps"
-     * Вызывается из analysis-потока не чаще раза в 500мс.
-     */
     private fun maybeUpdateLatencyHud() {
         val now = System.currentTimeMillis()
         if (now - lastLatencyUpdate < 500) return
@@ -222,19 +207,16 @@ class VideoFragment : Fragment() {
         val snap = latency.snapshot()
         if (snap.count == 0) return
         handler.post {
-            val inferMs = snap.stageAvgMs["inference"] ?: 0f
             val totalMs = snap.avgTotalMs
-            // Цвет по задержке: <30ms зелёный, <80ms жёлтый, >80ms красный
             val color = when {
                 totalMs < 30f -> 0xFF00E676.toInt()
                 totalMs < 80f -> 0xFFFFAB00.toInt()
                 else          -> 0xFFFF5252.toInt()
             }
             tvLatency.setTextColor(color)
-            tvLatency.text = if (inferMs > 0f)
-                "%.0fms  infer %.0fms  · cam %.0ffps".format(totalMs, inferMs, lastCameraFps)
-            else
-                "%.0fms  · cam %.0ffps".format(totalMs, lastCameraFps)
+            // v2.8: show dropped frames count so user knows if pipeline is overloaded
+            val dropInfo = if (droppedAnalysisFrames > 0) " d:$droppedAnalysisFrames" else ""
+            tvLatency.text = "lat: %.0f ms · fps: %.0f%s".format(totalMs, lastCameraFps, dropInfo)
         }
     }
 
@@ -247,7 +229,9 @@ class VideoFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             vm.turretFrame.collectLatest { bmp ->
                 if (bmp != null) {
-                    if (swapped) ivXiaoMain.setImageBitmap(bmp)
+                    if (swapped) {
+                        ivXiaoMain.setImageBitmap(bmp)
+                    }
                     else if (pipContainer.visibility == View.VISIBLE) ivTurretPip.setImageBitmap(bmp)
                 }
             }
@@ -270,6 +254,7 @@ class VideoFragment : Fragment() {
     }
 
     private fun setSwapped(s: Boolean) {
+        Log.d(TAG, "setSwapped: $s")
         swapped = s
         val mode = vm.trackMode.value
         if (swapped) {
@@ -278,7 +263,6 @@ class VideoFragment : Fragment() {
             tvMainSourceLabel.text = "XIAO"
             tvMainSourceLabel.visibility = View.VISIBLE
             tvPipSourceLabel.text = "PHONE"
-            // Скрываем PiP, потому что он не может показывать камеру телефона
             pipContainer.visibility = View.GONE
             btnPipVideo.isChecked = false
         } else {
@@ -314,11 +298,29 @@ class VideoFragment : Fragment() {
             xiaoAnalysisJob = viewLifecycleOwner.lifecycleScope.launch {
                 vm.turretFrame.collectLatest { bmp ->
                     if (bmp != null && swapped) {
-                        val copy = bmp.copy(Bitmap.Config.ARGB_8888, false) ?: return@collectLatest
-                        analysisExecutor.execute { processXiaoFrame(copy) }
+                        // v2.8: inference gate — skip frame if previous inference still running
+                        if (!inferenceRunning.compareAndSet(false, true)) {
+                            droppedAnalysisFrames++
+                            return@collectLatest
+                        }
+                        // Must copy: turretFrame can be recycled when next frame arrives
+                        val copy = bmp.copy(Bitmap.Config.ARGB_8888, false)
+                        if (copy == null) {
+                            inferenceRunning.set(false)
+                            return@collectLatest
+                        }
+                        analysisExecutor.execute {
+                            try {
+                                processXiaoFrame(copy)
+                            } finally {
+                                inferenceRunning.set(false)
+                            }
+                        }
                     }
                 }
             }
+        } else {
+            inferenceRunning.set(false)
         }
     }
 
@@ -326,11 +328,10 @@ class VideoFragment : Fragment() {
         val ft = latency.beginFrame()
         latency.mark(ft, LatencyTracker.Stage.DECODED)
         latency.mark(ft, LatencyTracker.Stage.INFERENCE_START)
-        
-        // Сохраняем размеры ДО recycle()
+
         val bitmapWidth = bitmap.width
         val bitmapHeight = bitmap.height
-        
+
         when (vm.trackMode.value) {
             TrackingMode.LASER_DOT -> {
                 val r = laserTracker?.process(bitmap)
@@ -407,7 +408,7 @@ class VideoFragment : Fragment() {
         joystickCam.visibility    = showCam
         tvDriveLabel.visibility   = showDrive
         tvCamLabel.visibility     = showCam
-        btnLaserVideo.visibility  = showDrive  // кнопка лазера видна когда виден джойстик движения
+        btnLaserVideo.visibility  = showDrive
     }
 
     // ── CameraX ──────────────────────────────────────────────────────────
@@ -455,15 +456,13 @@ class VideoFragment : Fragment() {
     // ── CameraX Frame Processing ──────────────────────────────────────────
 
     private fun processFrame(imageProxy: ImageProxy) {
-        // FPS камеры (считаем все кадры независимо от режима)
         frameCount++
         val now = System.currentTimeMillis()
         if (now - lastFpsTime >= 1000) {
             lastCameraFps = frameCount * 1000f / (now - lastFpsTime)
-            handler.post { tvFps.text = "%.0f FPS".format(lastCameraFps) }
+            handler.post { tvFps.text = "fps: %.0f".format(lastCameraFps) }
             frameCount = 0
             lastFpsTime = now
-            // В Manual обновляем латенси просто FPS-ом
             val mode = vm.trackMode.value
             if (mode == TrackingMode.MANUAL || mode == TrackingMode.GYRO_TILT) {
                 updateLatencyManual()
@@ -608,12 +607,16 @@ class VideoFragment : Fragment() {
                         spinnerMode.setSelection(0)
                     }
                 } else {
-                    // Update sensitivity if tracker already exists
                     val settings = vm.sensitivity.value
                     objectTracker?.updateSensitivity(settings.camPanSens, settings.camTiltSens)
                 }
             }
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        xiaoAnalysisJob?.cancel()
     }
 
     override fun onDestroyView() {

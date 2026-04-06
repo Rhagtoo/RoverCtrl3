@@ -70,12 +70,15 @@ class CommandSender {
     }
 
     fun sendXiao(pan: Int, tilt: Int) {
+        Log.d(TAG, "sendXiao: pan=$pan, tilt=$tilt")
         val panScaled = (pan * 90 / 100).coerceIn(-90, 90)
         val tiltScaled = (tilt * 90 / 100).coerceIn(-90, 90)
+        Log.d(TAG, "sendXiao scaled: panScaled=$panScaled, tiltScaled=$tiltScaled")
         val msg = "PAN:$panScaled;TILT:$tiltScaled\n"
         scope.launch {
             val addr = xiaoAddr
             if (addr != null) {
+                Log.d(TAG, "Sending to $addr:$xiaoPort: $msg")
                 sendRaw(msg.toByteArray(), addr, xiaoPort)
             }
         }
@@ -96,12 +99,13 @@ class CommandSender {
     /**
      * TSET — set tilt parameters at runtime (not persisted until TSAVE)
      *
-     * @param neutral  PWM stop value (70-110, typically 88-92)
-     * @param maxSpeed max PWM offset from neutral (10-90)
-     * @param dpsUp    °/s when camera moves UP (angle decreasing, against gravity)
-     * @param dpsDn    °/s when camera moves DOWN (angle increasing, with gravity)
-     * @param deadband deadband in degrees (1.0-20.0)
-     * @param driftCorr drift correction speed °/s (0-100)
+     * @param neutral    PWM stop value (70-110, typically 88-92)
+     * @param maxSpeed   max PWM offset from neutral (10-90)
+     * @param dpsUp      °/s when camera moves UP (angle decreasing, against gravity)
+     * @param dpsDn      °/s when camera moves DOWN (angle increasing, with gravity)
+     * @param deadband   deadband in degrees (1.0-20.0)
+     * @param driftCorr  drift correction speed °/s (0-100)
+     * @param tcalSpeed  safe PWM offset for TCAL sweeps (5-60, default 20)
      */
     fun sendTset(
         neutral: Int? = null,
@@ -109,15 +113,17 @@ class CommandSender {
         dpsUp: Float? = null,
         dpsDn: Float? = null,
         deadband: Float? = null,
-        driftCorr: Float? = null
+        driftCorr: Float? = null,
+        tcalSpeed: Int? = null
     ) {
         val parts = mutableListOf("TSET:")
-        neutral?.let   { parts.add("N:$it") }
-        maxSpeed?.let  { parts.add("S:$it") }
-        dpsUp?.let     { parts.add("U:${String.format("%.1f", it)}") }
-        dpsDn?.let     { parts.add("D:${String.format("%.1f", it)}") }
-        deadband?.let  { parts.add("DB:${String.format("%.1f", it)}") }
-        driftCorr?.let { parts.add("DC:${String.format("%.1f", it)}") }
+        neutral?.let    { parts.add("N:$it") }
+        maxSpeed?.let   { parts.add("S:$it") }
+        dpsUp?.let      { parts.add("U:${String.format("%.1f", it)}") }
+        dpsDn?.let      { parts.add("D:${String.format("%.1f", it)}") }
+        deadband?.let   { parts.add("DB:${String.format("%.1f", it)}") }
+        driftCorr?.let  { parts.add("DC:${String.format("%.1f", it)}") }
+        tcalSpeed?.let  { parts.add("TS:$it") }
 
         if (parts.size <= 1) return  // nothing to set
         val msg = parts.joinToString(";") + "\n"
@@ -140,22 +146,22 @@ class CommandSender {
         }
     }
 
-    /** TCAL:UP — test sweep camera UP for 2s */
-    fun sendTcalUp() {
+    /** TCAL:UP[:ms] — test sweep camera UP for given duration */
+    fun sendTcalUp(durationMs: Int = 500) {
         scope.launch {
             val addr = xiaoAddr
             if (addr != null) {
-                sendRaw("TCAL:UP\n".toByteArray(), addr, xiaoPort)
+                sendRaw("TCAL:UP:$durationMs\n".toByteArray(), addr, xiaoPort)
             }
         }
     }
 
-    /** TCAL:DN — test sweep camera DOWN for 2s */
-    fun sendTcalDn() {
+    /** TCAL:DN[:ms] — test sweep camera DOWN for given duration */
+    fun sendTcalDn(durationMs: Int = 500) {
         scope.launch {
             val addr = xiaoAddr
             if (addr != null) {
-                sendRaw("TCAL:DN\n".toByteArray(), addr, xiaoPort)
+                sendRaw("TCAL:DN:$durationMs\n".toByteArray(), addr, xiaoPort)
             }
         }
     }
@@ -166,6 +172,16 @@ class CommandSender {
             val addr = xiaoAddr
             if (addr != null) {
                 sendRaw("TCAL:STOP\n".toByteArray(), addr, xiaoPort)
+            }
+        }
+    }
+
+    /** CEXIT — exit calibration mode, resume normal PAN/TILT control */
+    fun sendCexit() {
+        scope.launch {
+            val addr = xiaoAddr
+            if (addr != null) {
+                sendRaw("CEXIT\n".toByteArray(), addr, xiaoPort)
             }
         }
     }

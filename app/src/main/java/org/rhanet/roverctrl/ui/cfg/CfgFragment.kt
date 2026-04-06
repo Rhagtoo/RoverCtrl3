@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.RadioButton
 import android.widget.RadioGroup
@@ -39,8 +40,11 @@ class CfgFragment : Fragment() {
     companion object {
         private const val TAG = "CfgFragment"
         private const val TILT_POLL_MS = 500L
-        private const val TCAL_DURATION_MS = 2000L
     }
+
+    // Adjustable test duration (ms). Start with 500ms for safety.
+    // Firmware TCAL runs for 2s max, with auto-stop at 60° estimated travel
+    private var tcalDurationMs = 500L
 
     private val vm: RoverViewModel by activityViewModels()
 
@@ -78,11 +82,8 @@ class CfgFragment : Fragment() {
 
     // Tilt calibration (VCAL)
     private lateinit var tvTiltStatus: TextView
-    private lateinit var btnTiltM5:    Button
-    private lateinit var btnTiltM1:    Button
-    private lateinit var btnTiltReset: Button
-    private lateinit var btnTiltP1:    Button
-    private lateinit var btnTiltP5:    Button
+    private lateinit var etVcalAngle: EditText
+    private lateinit var btnVcalSet:  Button
 
     // Tilt parameters (TSET)
     private lateinit var sbTpNeutral:    SeekBar
@@ -99,10 +100,16 @@ class CfgFragment : Fragment() {
     private lateinit var btnTcalDn:      Button
     private lateinit var btnTpSave:      Button
     private lateinit var tvTcalResult:   TextView
+    private lateinit var llTcalInput:    LinearLayout
+    private lateinit var etTcalActual:   EditText
+    private lateinit var btnTcalApply:   Button
+    private lateinit var btnTcalCancel:  Button
+    private lateinit var rgTcalDuration: RadioGroup
 
     private var tiltPollJob: Job? = null
     private var lastKnownVirtual: Float = 90f
-    private var tcalStartAngle: Float = 0f   // for measuring test sweep delta
+    private var tcalStartAngle: Float = 0f
+    private var lastTcalDirection: String = ""  // "UP" or "DN"
 
     private var selectedBinUri: Uri? = null
 
@@ -154,11 +161,8 @@ class CfgFragment : Fragment() {
 
         // Tilt calibration (VCAL)
         tvTiltStatus = view.findViewById(R.id.tv_tilt_status)
-        btnTiltM5    = view.findViewById(R.id.btn_tilt_m5)
-        btnTiltM1    = view.findViewById(R.id.btn_tilt_m1)
-        btnTiltReset = view.findViewById(R.id.btn_tilt_reset)
-        btnTiltP1    = view.findViewById(R.id.btn_tilt_p1)
-        btnTiltP5    = view.findViewById(R.id.btn_tilt_p5)
+        etVcalAngle  = view.findViewById(R.id.et_vcal_angle)
+        btnVcalSet   = view.findViewById(R.id.btn_vcal_set)
 
         // Tilt parameters (TSET)
         sbTpNeutral     = view.findViewById(R.id.sb_tp_neutral)
@@ -175,6 +179,11 @@ class CfgFragment : Fragment() {
         btnTcalDn       = view.findViewById(R.id.btn_tcal_dn)
         btnTpSave       = view.findViewById(R.id.btn_tp_save)
         tvTcalResult    = view.findViewById(R.id.tv_tcal_result)
+        llTcalInput     = view.findViewById(R.id.ll_tcal_input)
+        etTcalActual    = view.findViewById(R.id.et_tcal_actual)
+        btnTcalApply    = view.findViewById(R.id.btn_tcal_apply)
+        btnTcalCancel   = view.findViewById(R.id.btn_tcal_cancel)
+        rgTcalDuration  = view.findViewById(R.id.rg_tcal_duration)
 
         loadSavedConfig()
         loadSensitivity()
@@ -276,21 +285,28 @@ class CfgFragment : Fragment() {
     // ── Tilt Calibration (VCAL) ───────────────────────────────────────────
 
     private fun setupTiltCalibration() {
-        btnTiltM5.setOnClickListener    { sendVcal(lastKnownVirtual - 5f) }
-        btnTiltM1.setOnClickListener    { sendVcal(lastKnownVirtual - 1f) }
-        btnTiltReset.setOnClickListener { sendVcal(90f) }
-        btnTiltP1.setOnClickListener    { sendVcal(lastKnownVirtual + 1f) }
-        btnTiltP5.setOnClickListener    { sendVcal(lastKnownVirtual + 5f) }
+        // Set Virtual angle — tells ESP "this position = X°", camera does NOT move
+        btnVcalSet.setOnClickListener {
+            val angle = etVcalAngle.text.toString().toFloatOrNull() ?: 90f
+            sendVcal(angle)
+        }
+
+        // TCAL Apply — user entered actual degrees moved
+        btnTcalApply.setOnClickListener { applyTcalResult() }
+        btnTcalCancel.setOnClickListener {
+            llTcalInput.visibility = View.GONE
+            tvTcalResult.text = "Cancelled"
+            tvTcalResult.setTextColor(0xFF888888.toInt())
+        }
     }
 
     private fun sendVcal(angle: Float) {
         val clamped = angle.coerceIn(0f, 180f)
         lastKnownVirtual = clamped
         vm.sender.sendVcal(clamped)
-        // Update UI immediately
         tvTiltStatus.text = "VCAL → ${String.format("%.1f", clamped)}°"
         tvTiltStatus.setTextColor(0xFFFFAB00.toInt())
-        Log.d(TAG, "VCAL sent: $clamped°")
+        Log.d(TAG, "VCAL sent: $clamped° (camera stays put)")
     }
 
     // ── Tilt Parameters (TSET) ────────────────────────────────────────────
@@ -323,7 +339,17 @@ class CfgFragment : Fragment() {
             vm.sender.sendTset(deadband = it.toFloat())
         })
 
-        // Test sweep buttons
+        // Duration selector
+        rgTcalDuration.setOnCheckedChangeListener { _, id ->
+            tcalDurationMs = when (id) {
+                R.id.rb_tcal_05s -> 500L
+                R.id.rb_tcal_1s  -> 1000L
+                R.id.rb_tcal_2s  -> 2000L
+                else -> 500L
+            }
+        }
+
+        // Test sweep buttons — motor runs tcalDurationMs, NO virtual angle update on ESP
         btnTcalUp.setOnClickListener { startTcal("UP") }
         btnTcalDn.setOnClickListener { startTcal("DN") }
 
@@ -334,43 +360,90 @@ class CfgFragment : Fragment() {
         }
     }
 
+    /**
+     * Start calibration test sweep.
+     * Motor runs at tcalSpeed (NOT maxSpeed) for tcalDurationMs.
+     * Auto-stops at 60° estimated. Virtual angle NOT updated on ESP.
+     */
     private fun startTcal(direction: String) {
         tcalStartAngle = lastKnownVirtual
-        tvTcalResult.text = "Testing $direction... start=%.1f°".format(tcalStartAngle)
+        lastTcalDirection = direction
+        llTcalInput.visibility = View.GONE
+        etTcalActual.text.clear()
+        val durSec = tcalDurationMs / 1000f
+        tvTcalResult.text = "Testing $direction... ${durSec}s (safe speed, auto-stop 60°)"
         tvTcalResult.setTextColor(0xFFFFAB00.toInt())
 
-        if (direction == "UP") {
-            vm.sender.sendTcalUp()
-            // Simulate movement UP (angle decreases)
-            lastKnownVirtual = (lastKnownVirtual - 30f).coerceAtLeast(0f)
-        } else {
-            vm.sender.sendTcalDn()
-            // Simulate movement DOWN (angle increases)
-            lastKnownVirtual = (lastKnownVirtual + 30f).coerceAtMost(180f)
+        btnTcalUp.isEnabled = false
+        btnTcalDn.isEnabled = false
+
+        val durMs = tcalDurationMs.toInt()
+        if (direction == "UP") vm.sender.sendTcalUp(durMs)
+        else vm.sender.sendTcalDn(durMs)
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            delay(tcalDurationMs + 500)  // wait for sweep + settle
+            btnTcalUp.isEnabled = true
+            btnTcalDn.isEnabled = true
+
+            val dir = if (direction == "UP") "↑" else "↓"
+            tvTcalResult.text = "Test $dir done. How many degrees did the camera actually move?"
+            tvTcalResult.setTextColor(0xFF80CBC4.toInt())
+            llTcalInput.visibility = View.VISIBLE
+            etTcalActual.requestFocus()
+        }
+    }
+
+    /**
+     * Apply calibration result.
+     * dps = actualDegrees / (tcalDurationMs / 1000)
+     * Sync virtual angle to new position via VCAL.
+     */
+    private fun applyTcalResult() {
+        val actualDegrees = etTcalActual.text.toString().toFloatOrNull()
+        if (actualDegrees == null || actualDegrees <= 0f) {
+            Toast.makeText(requireContext(), "Enter positive degrees", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (actualDegrees > 170f) {
+            Toast.makeText(requireContext(),
+                "⚠ ${actualDegrees}° is very large — are you sure? Consider shorter test duration.",
+                Toast.LENGTH_LONG).show()
         }
 
-        // After 2.5s (2s sweep + 0.5s settle), read result
-        viewLifecycleOwner.lifecycleScope.launch {
-            delay(TCAL_DURATION_MS + 500)
-            val delta = lastKnownVirtual - tcalStartAngle
-            val actualDps = kotlin.math.abs(delta) / (TCAL_DURATION_MS / 1000f)
-            
-            if (kotlin.math.abs(delta) < 0.1f) {
-                // If no movement detected, show warning
-                tvTcalResult.text = String.format(
-                    "%s: NO MOVEMENT (Δ=%.1f°) — check XIAO connection/commands",
-                    direction, delta
-                )
-                tvTcalResult.setTextColor(0xFFFF5252.toInt())
-            } else {
-                tvTcalResult.text = String.format(
-                    "%s: Δ=%.1f°  measured=%.0f°/s  (start=%.1f° end=%.1f°)",
-                    direction, delta, actualDps, tcalStartAngle, lastKnownVirtual
-                )
-                tvTiltStatus.text = String.format("V:%.1f° (tested)", lastKnownVirtual)
-                tvTcalResult.setTextColor(0xFF00E676.toInt())
-            }
+        val elapsedSec = tcalDurationMs / 1000f
+        val newDps = actualDegrees / elapsedSec
+        val isUp = lastTcalDirection == "UP"
+
+        // New virtual angle after test
+        val newVirtual = if (isUp)
+            (tcalStartAngle - actualDegrees).coerceIn(0f, 180f)
+        else
+            (tcalStartAngle + actualDegrees).coerceIn(0f, 180f)
+
+        // Apply dps
+        if (isUp) {
+            vm.sender.sendTset(dpsUp = newDps)
+            sbTpDpsUp.progress = newDps.toInt()
+            tvTpDpsUpVal.text = newDps.toInt().toString()
+        } else {
+            vm.sender.sendTset(dpsDn = newDps)
+            sbTpDpsDn.progress = newDps.toInt()
+            tvTpDpsDnVal.text = newDps.toInt().toString()
         }
+
+        // Sync virtual angle — servo stays put (VCAL forces neutral)
+        sendVcal(newVirtual)
+        etVcalAngle.setText(String.format("%.0f", newVirtual))
+
+        val dir = if (isUp) "↑ UP" else "↓ DN"
+        tvTcalResult.text = String.format(
+            "%s: %.0f° / %.1fs = %.0f°/s → Virtual=%.0f°",
+            dir, actualDegrees, elapsedSec, newDps, newVirtual)
+        tvTcalResult.setTextColor(0xFF00E676.toInt())
+        llTcalInput.visibility = View.GONE
+
+        Log.d(TAG, "TCAL applied: $dir actual=${actualDegrees}° dps=${newDps} virtual=$newVirtual")
     }
 
     // ── Tilt Status Polling ───────────────────────────────────────────────
@@ -578,8 +651,15 @@ class CfgFragment : Fragment() {
         vm.updateSensitivity(requireContext(), s)
     }
 
+    override fun onStop() {
+        super.onStop()
+        Log.d(TAG, "onStop: stopping tilt polling")
+        stopTiltPolling()
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
+        Log.d(TAG, "onDestroyView: stopping tilt polling")
         stopTiltPolling()
     }
 }

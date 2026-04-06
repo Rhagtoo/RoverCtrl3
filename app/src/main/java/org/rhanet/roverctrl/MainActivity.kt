@@ -10,6 +10,7 @@ import androidx.core.view.updatePadding
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.setupWithNavController
 import com.google.android.material.bottomnavigation.BottomNavigationView
+import org.rhanet.roverctrl.tracking.ModelPreloader
 
 class MainActivity : AppCompatActivity() {
 
@@ -20,6 +21,9 @@ class MainActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         
         setContentView(R.layout.activity_main)
+
+        // Предзагрузка модели YOLO для устранения подвисания при первом запуске детектирования
+        ModelPreloader.preload(applicationContext)
 
         // Не гасить экран при управлении ровером
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

@@ -23,16 +23,21 @@ import org.rhanet.roverctrl.tracking.CalibrationResult
 import org.rhanet.roverctrl.tracking.OdometryTracker
 import org.rhanet.roverctrl.tracking.PidController
 
+/**
+ * RoverViewModel
+ *
+ * v2.8 PERF:
+ *   - Removed per-frame Log.d in turret stream callback (was ~15 log writes/sec)
+ *   - Streamlined bitmap rotation: single createBitmap call, recycle original
+ */
 class RoverViewModel : ViewModel() {
 
     companion object {
         private const val TAG = "RoverVM"
         private const val CMD_TICK_MS = 50L
         private const val RSSI_POLL_MS = 2000L
-
-        // Угол поворота кадра с камеры XIAO (градусы, по часовой стрелке).
-        // Меняй если турель смонтирована иначе: 0 / 90 / 180 / 270
-        private const val TURRET_ROTATION_DEG = 90f  // XIAO камера в portrait, поворачиваем на 90° для landscape
+        // OV2640 HVGA = 480×320 landscape. 0 = no rotation needed.
+        private const val TURRET_ROTATION_DEG = 0f
     }
 
     val sender   = CommandSender()
@@ -65,9 +70,6 @@ class RoverViewModel : ViewModel() {
     private val _turretConnected = MutableStateFlow(false)
     val turretConnected: StateFlow<Boolean> get() = _turretConnected
 
-    // RSSI телефона к роверу (dBm).
-    // Ровер в AP-режиме — WiFi.RSSI() на ESP32 всегда 0 (нет базовой станции).
-    // Читаем RSSI на стороне Android через WifiManager.connectionInfo.rssi
     private val _wifiRssi        = MutableStateFlow(0)
     val wifiRssi: StateFlow<Int> get() = _wifiRssi
 
@@ -106,7 +108,6 @@ class RoverViewModel : ViewModel() {
     @Volatile private var str = 0
     @Volatile private var fwd = 0
 
-    // Матрица поворота — пересоздавать не нужно, используем один экземпляр
     private val turretRotMatrix = Matrix().apply { postRotate(TURRET_ROTATION_DEG) }
 
     // ── Connect ───────────────────────────────────────────────────────────
@@ -178,38 +179,31 @@ class RoverViewModel : ViewModel() {
     // ── Turret stream ─────────────────────────────────────────────────────
 
     private fun startTurretStream(url: String) {
+        Log.d(TAG, "Starting turret stream: $url")
         stopTurretStream()
         mjpegDecoder = MjpegDecoder(
             url = url,
             onFrame = { bmp ->
-                // Всегда создаём копию bitmap для thread safety
-                // XIAO камера в portrait, поворачиваем на 90° для landscape ориентации
-                val frameToUse = if (TURRET_ROTATION_DEG == 0f) {
-                    // Создаём копию без поворота
-                    bmp.copy(bmp.config, true) ?: run {
-                        Log.w(TAG, "Failed to copy bitmap, using original")
-                        bmp
-                    }
+                // TURRET_ROTATION_DEG=0: OV2640 HVGA outputs landscape directly
+                // Copy bitmap because MjpegDecoder reuses it via inBitmap
+                // Do NOT recycle bmp — MjpegDecoder owns it for inBitmap recycling
+                val frame = if (TURRET_ROTATION_DEG == 0f) {
+                    bmp.copy(bmp.config ?: Bitmap.Config.ARGB_8888, false)
                 } else {
-                    // Создаём копию с поворотом
                     Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, turretRotMatrix, true)
                 }
-                
-                // Освобождаем оригинальный bitmap после создания копии
-                // Но только если создали новую bitmap (не используем оригинал как fallback)
-                if (frameToUse !== bmp) {
-                    bmp.recycle()
-                }
 
-                mainHandler.post {
-                    _turretFrame.value?.recycle()
-                    _turretFrame.value = frameToUse
-                    _turretConnected.value = true
+                if (frame != null) {
+                    mainHandler.post {
+                        _turretFrame.value?.recycle()
+                        _turretFrame.value = frame
+                        _turretConnected.value = true
+                    }
                 }
             },
             onFps   = { fps -> mainHandler.post { _turretFps.value = fps } },
             onError = { e ->
-                Log.w(TAG, "MJPEG: ${e.message}")
+                Log.w(TAG, "MJPEG error: ${e.message}")
                 mainHandler.post { _turretConnected.value = false }
             }
         ).also { it.start() }

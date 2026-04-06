@@ -1,28 +1,54 @@
-# v2.7 Update — XIAO Performance Fix
+# v2.9 — Safe Tilt Calibration
 
-## Что изменено
+Target branch: bugfixes-2026-04-05
 
-### firmware/turret_client/turret_client.ino
-- Камера: HVGA 480×320 (было VGA 640×480), quality 10 (было 6)
-- Убран ArduinoOTA (mDNS overhead)
-- Убран Arduino WebServer на порту 80 (синхронный, блокировал loop)
-- Все HTTP-эндпоинты на одном async esp_httpd (порт 81):
-  `/stream`, `/capture`, `/status`, `/update` (GET=форма, POST=бинарь)
-- Исправлен /status JSON (были ссылки на несуществующие переменные)
-- loop() теперь: checkWiFi + updateServos + delay(10) — ничего лишнего
-- OTA через браузер: http://192.168.4.2:81/update
+## Проблема
+speed=40, test 2s → камера делает 270° (три четверти оборота),
+после Apply виртуальный угол уходит в 0, при следующем Test Down
+система "компенсирует" и хуярит на полной скорости наматывая провода.
 
-### app/.../network/OtaUploader.kt
-- Добавлен параметр `port` (80 для ровера, 81 для турели)
-- Добавлен параметр `rawBinary` (true = raw POST, false = multipart)
-- Турель v2.7+: raw binary на порт 81
-- Ровер: без изменений (multipart на порт 80)
+## Корневые причины
+1. TCAL использовал maxSpeed (40-60 PWM) — слишком быстро для CR серво
+2. Длительность 2с — слишком долго при высокой скорости
+3. Нет ограничения максимального угла за один тест
+4. PAN/TILT команды продолжали приходить во время калибровки
+
+## Исправления
+
+### firmware/turret_client.ino
+- **tcalSpeed = 20** — отдельная безопасная скорость для калибровки (НЕ maxSpeed!)
+- **tcalDurationMs = 500** — default 0.5s (было 2s)
+- **TCAL_MAX_DEGREES = 60** — auto-stop если оценочный угол превышен
+- **calMode** — блокирует PAN/TILT команды во время калибровки
+- Парсит длительность из команды: `TCAL:UP:750` → 750ms тест
+- VCAL принудительно ставит servo=neutral (race condition fix)
+
+### app/.../network/CommandSender.kt
+- sendTcalUp(durationMs) / sendTcalDn(durationMs) — передают длительность
+- Формат UDP: `TCAL:UP:500\n`
 
 ### app/.../ui/cfg/CfgFragment.kt
-- Поллинг /status только на порту 81 (убрана попытка порта 80)
-- OTA upload: автоопределение порта и формата по цели (ровер/турель)
+- RadioGroup: выбор длительности 0.5s / 1s / 2s
+- Default = 0.5s
+- Warning при вводе >170° ("are you sure?")
+- Показывает длительность в статусе теста
+
+### app/.../res/layout/fragment_cfg.xml
+- Добавлен RadioGroup с тремя вариантами длительности
+- Кнопки Test ↑ / Test ↓ без hardcoded "2s"
+- Обновлена инструкция
+
+## Инструкция по калибровке
+1. Virtual = 90, камеру вперёд → Set
+2. Выбрать 0.5s, нажать Test ↑
+   → камера едет МЕДЛЕННО (speed=20) 0.5s, max 60°
+   → автостоп по времени или по углу (что раньше)
+3. Ввести реальные градусы → Apply
+4. Повторить Test ↓
+5. Save ESP → NVS
+6. ПОСЛЕ калибровки dps → выставить рабочий maxSpeed слайдером
 
 ## Установка
-1. Распаковать архив в корень репы (файлы заменятся)
-2. Прошить турель через Arduino IDE
-3. Собрать и установить Android-приложение
+1. Распаковать в корень репы (ветка bugfixes-2026-04-05)
+2. Прошить турель (firmware изменена!)
+3. Собрать APK
