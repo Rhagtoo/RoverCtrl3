@@ -2,6 +2,8 @@ package org.rhanet.roverctrl.tracking
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Rect
 import android.util.Log
 import kotlin.jvm.Volatile
 import org.rhanet.roverctrl.data.DetectionResult
@@ -66,6 +68,7 @@ class ObjectTracker(
     // v2.8: pre-allocated buffers — reused every frame instead of allocating
     private var cachedInputBuffer: ByteBuffer? = null
     private var cachedPixels: IntArray? = null
+    private var cachedScaledBitmap: Bitmap? = null
 
     // v2.8: throttle logging — only log every Nth detection
     private var detectCount = 0L
@@ -323,14 +326,22 @@ class ObjectTracker(
         synchronized(this) {
             if (closed) return null
             val sz = modelInputSize
-            val scaled = Bitmap.createScaledBitmap(frame, sz, sz, true)
 
-            // v2.8: reuse pre-allocated buffers
+            // Reuse scaled bitmap (eliminates 1.6MB alloc per frame)
+            val scaled = cachedScaledBitmap?.takeIf {
+                !it.isRecycled && it.width == sz && it.height == sz
+            } ?: Bitmap.createBitmap(sz, sz, Bitmap.Config.ARGB_8888).also {
+                cachedScaledBitmap = it
+            }
+            val canvas = Canvas(scaled)
+            canvas.drawBitmap(frame,
+                Rect(0, 0, frame.width, frame.height),
+                Rect(0, 0, sz, sz), null)
+
             val buf = cachedInputBuffer!!
             val pixels = cachedPixels!!
             if (inputNchw) fillNchwBuffer(scaled, buf, pixels)
             else fillNhwcBuffer(scaled, buf, pixels)
-            scaled.recycle()
 
             val outShape = interp.getOutputTensor(0).shape()
             val dim1 = outShape[1]
@@ -352,14 +363,13 @@ class ObjectTracker(
         val numBoxes  = if (isTransposed) dim1 else dim2
         val numAttrs  = if (isTransposed) dim2 else dim1
 
-        Log.d(TAG, "bestBox shape: $dim1 x $dim2, numAttrs=$numAttrs, numBoxes=$numBoxes")
-
-        // Determine model type based on numAttrs
-        val isYolo26 = numAttrs == 6 || numAttrs == 85  // 6: x1,y1,x2,y2,conf,class; 85: cx,cy,w,h,conf + 80 classes
-        val isYoloV8 = numAttrs == 84 || numAttrs == 85 // 84: cx,cy,w,h + 80 classes
+        // YOLO26 NMS-free: 6 attrs = [x1, y1, x2, y2, conf, classId]
+        // YOLOv8: 84 attrs = [cx, cy, w, h, 80×class_scores] or 85 with objectness
+        val isYolo26 = (numAttrs == 6)
+        val isYoloV8 = (numAttrs == 84 || numAttrs == 85)
         if (!isYoloV8 && !isYolo26) {
-            Log.w(TAG, "Unexpected output attrs: $numAttrs, shape: $dim1 x $dim2")
-            // Fallback: try to treat as YOLO26 with 6 attrs
+            Log.w(TAG, "Unknown output format: ${dim1}x${dim2}, numAttrs=$numAttrs")
+            return null
         }
 
         var maxCoord = 0f
@@ -369,7 +379,6 @@ class ObjectTracker(
             maxCoord = maxOf(maxCoord, cx, cy)
         }
         val scale = if (maxCoord > 2.0f) modelInputSize.toFloat() else 1.0f
-        Log.d(TAG, "maxCoord=$maxCoord, scale=$scale")
 
         // Collect detections
         val boxes = mutableListOf<Box>()
@@ -485,6 +494,8 @@ class ObjectTracker(
             if (closed) return
             closed = true
             interp.close()
+            cachedScaledBitmap?.recycle()
+            cachedScaledBitmap = null
             cachedInputBuffer = null
             cachedPixels = null
         }
