@@ -7,6 +7,7 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -14,6 +15,8 @@ import android.widget.ProgressBar
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.SeekBar
+import android.widget.Spinner
+import android.widget.AdapterView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -87,6 +90,7 @@ class CfgFragment : Fragment() {
     private lateinit var tvTrkDzVal:     TextView
     private lateinit var tvTrkExpoVal:   TextView
     private lateinit var tvTrkRateVal:   TextView
+    private lateinit var spinnerModel:   Spinner
 
     // Tilt calibration (VCAL)
     private lateinit var tvTiltStatus: TextView
@@ -174,6 +178,7 @@ class CfgFragment : Fragment() {
         tvTrkDzVal      = view.findViewById(R.id.tv_trk_dz_val)
         tvTrkExpoVal    = view.findViewById(R.id.tv_trk_expo_val)
         tvTrkRateVal    = view.findViewById(R.id.tv_trk_rate_val)
+        spinnerModel    = view.findViewById(R.id.spinner_model)
 
         // Tilt calibration (VCAL)
         tvTiltStatus = view.findViewById(R.id.tv_tilt_status)
@@ -205,6 +210,7 @@ class CfgFragment : Fragment() {
         loadSensitivity()
         setupOta()
         setupSensitivitySliders()
+        setupModelSpinner()
         setupTiltCalibration()
         setupTiltParameters()
 
@@ -690,7 +696,38 @@ class CfgFragment : Fragment() {
         })
     }
 
+    private fun setupModelSpinner() {
+        // List .tflite files in assets
+        val modelList = mutableListOf<String>()
+        try {
+            requireContext().assets.list("")?.forEach { name ->
+                if (name.endsWith(".tflite")) modelList.add(name)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to list assets", e)
+        }
+        if (modelList.isEmpty()) {
+            modelList.add("yolov8n.tflite") // fallback
+        }
+        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, modelList)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spinnerModel.adapter = adapter
+
+        // Select current model from settings
+        val settings = AppSettings.load(requireContext())
+        val pos = modelList.indexOf(settings.modelName)
+        spinnerModel.setSelection(if (pos >= 0) pos else 0)
+
+        spinnerModel.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>, view: View?, pos: Int, id: Long) {
+                saveSensitivity()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>) {}
+        }
+    }
+
     private fun saveSensitivity() {
+        val modelName = spinnerModel.selectedItem as? String ?: "yolov8n.tflite"
         val s = AppSettings(
             driveSpeedSens = AppSettings.progressToSens(sbDriveSpeed.progress),
             driveSteerSens = AppSettings.progressToSens(sbDriveSteer.progress),
@@ -698,7 +735,8 @@ class CfgFragment : Fragment() {
             camTiltSens    = AppSettings.progressToSens(sbCamTilt.progress),
             trackDeadzone  = sbTrkDeadzone.progress / 100f,   // 4 → 0.04
             trackExpo      = sbTrkExpo.progress / 10f,        // 20 → 2.0
-            trackRateLimit = sbTrkRate.progress.toFloat()      // 8 → 8.0
+            trackRateLimit = sbTrkRate.progress.toFloat(),    // 8 → 8.0
+            modelName      = modelName
         )
         vm.updateSensitivity(requireContext(), s)
     }

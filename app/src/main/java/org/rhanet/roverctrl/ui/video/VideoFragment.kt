@@ -598,10 +598,8 @@ class VideoFragment : Fragment() {
                 if (objectTracker == null) {
                     try {
                         val settings = vm.sensitivity.value
-                        // Try INT8 quantized model first (2-3× faster on NNAPI)
-                        val modelFile = if (requireContext().assets.list("")
-                                ?.contains("yolov8n_int8.tflite") == true)
-                            "yolov8n_int8.tflite" else "yolov8n.tflite"
+                        // Use selected model from settings
+                        val modelFile = settings.modelName
                         objectTracker = ObjectTracker(
                             context = requireContext(),
                             modelFile = modelFile,

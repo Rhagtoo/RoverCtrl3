@@ -14,7 +14,9 @@ data class AppSettings(
     // Tracking tuning (ObjectTracker anti-jitter)
     val trackDeadzone:  Float = 0.04f, // 0.01..0.15 center deadzone (fraction of frame)
     val trackExpo:      Float = 2.0f,  // 1.0..3.0  exponential curve power
-    val trackRateLimit: Float = 8.0f   // 2..30     max command change per frame
+    val trackRateLimit: Float = 8.0f,  // 2..30     max command change per frame
+    // Model selection
+    val modelName:      String = "yolov8n.tflite" // TFLite model filename in assets
 ) {
     companion object {
         private const val PREFS          = "app_settings"
@@ -25,6 +27,7 @@ data class AppSettings(
         private const val KEY_TRACK_DZ   = "track_deadzone"
         private const val KEY_TRACK_EXPO = "track_expo"
         private const val KEY_TRACK_RATE = "track_rate_limit"
+        private const val KEY_MODEL_NAME = "model_name"
 
         fun load(ctx: Context): AppSettings {
             val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -35,7 +38,8 @@ data class AppSettings(
                 camTiltSens    = p.getFloat(KEY_CAM_TILT,  1.0f),
                 trackDeadzone  = p.getFloat(KEY_TRACK_DZ,  0.04f),
                 trackExpo      = p.getFloat(KEY_TRACK_EXPO, 2.0f),
-                trackRateLimit = p.getFloat(KEY_TRACK_RATE, 8.0f)
+                trackRateLimit = p.getFloat(KEY_TRACK_RATE, 8.0f),
+                modelName      = p.getString(KEY_MODEL_NAME, "yolov8n.tflite") ?: "yolov8n.tflite"
             )
         }
 
@@ -48,6 +52,7 @@ data class AppSettings(
                 .putFloat(KEY_TRACK_DZ,  s.trackDeadzone)
                 .putFloat(KEY_TRACK_EXPO, s.trackExpo)
                 .putFloat(KEY_TRACK_RATE, s.trackRateLimit)
+                .putString(KEY_MODEL_NAME, s.modelName)
                 .apply()
         }
 
