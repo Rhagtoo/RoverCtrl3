@@ -384,7 +384,7 @@ void parseCommand(const char* cmd) {
     if ((ptr = strstr(cmd, "TILT:")) != NULL)  { tilt = atoi(ptr + 5); ht = true; }
 
     // VCAL:<angle> — set virtual angle reference (calibration)
-    // Enables calMode: ignores PAN/TILT until CEXIT
+    // Does NOT enter calMode — this is just setting a reference point
     if ((ptr = strstr(cmd, "VCAL:")) != NULL) {
         float cal = atof(ptr + 5);
         cal = constrain(cal, 0.0f, 180.0f);
@@ -392,8 +392,7 @@ void parseCommand(const char* cmd) {
         tiltTargetAngle = cal;
         servoTilt.write(tiltCfg.neutral);  // force stop
         currentTiltPwm = tiltCfg.neutral;
-        calMode = true;  // enter calibration mode
-        Serial.printf("VCAL: virtual=%.1f calMode=ON\n", cal);
+        Serial.printf("VCAL: virtual=%.1f\n", cal);
     }
 
     // CEXIT — exit calibration mode, resume normal PAN/TILT control
@@ -509,11 +508,12 @@ void updateServos() {
         bool angleLimit = (tcalEstimatedAngle >= TCAL_MAX_DEGREES);
 
         if (timeUp || angleLimit) {
-            // Test done — stop servo
+            // Test done — stop servo, exit calMode
             servoTilt.write(tiltCfg.neutral);
             currentTiltPwm = tiltCfg.neutral;
             tcalActive = false;
             tcalDone = true;
+            calMode = false;  // resume normal PAN/TILT control
             tcalElapsedMs = now - tcalStartMs;
             tiltTargetAngle = virtualTiltAngle;  // freeze position
             Serial.printf("TCAL done: %lums est=%.1f° %s (virtual unchanged at %.1f°)\n",
