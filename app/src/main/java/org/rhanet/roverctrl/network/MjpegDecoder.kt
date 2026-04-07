@@ -32,6 +32,13 @@ class MjpegDecoder(
     private var frameTs = ArrayDeque<Long>(32)
     private var totalFrames = 0L
     private var droppedFrames = 0L
+    private var corruptedFrames = 0L
+
+    // Known good frame dimensions (set after first valid frame)
+    private var expectedWidth = 0
+    private var expectedHeight = 0
+    // Minimum JPEG size for HVGA frame (anything smaller is truncated/corrupted)
+    private val MIN_JPEG_SIZE = 2048
 
     override fun run() {
         running = true
@@ -51,7 +58,7 @@ class MjpegDecoder(
                 }
             }
         }
-        Log.i(TAG, "Stopped. Total: $totalFrames, dropped: $droppedFrames")
+        Log.i(TAG, "Stopped. Total: $totalFrames, dropped: $droppedFrames, corrupted: $corruptedFrames")
     }
 
     private fun stream(input: InputStream) {
@@ -75,13 +82,34 @@ class MjpegDecoder(
                     if (eoi < 0) { fb.compact(soi); break }
 
                     val end = eoi + 2
+                    val jpegLen = end - soi
                     try {
-                        val bmp = BitmapFactory.decodeByteArray(fb.array(), soi, end - soi)
+                        // Reject too-small frames (truncated by WiFi)
+                        if (jpegLen < MIN_JPEG_SIZE) {
+                            corruptedFrames++
+                            fb.compact(end)
+                            continue
+                        }
+                        val bmp = BitmapFactory.decodeByteArray(fb.array(), soi, jpegLen)
                         if (bmp != null) {
+                            // Reject frames with wrong dimensions (corrupted JPEG header)
+                            if (expectedWidth > 0 &&
+                                (bmp.width != expectedWidth || bmp.height != expectedHeight)) {
+                                bmp.recycle()
+                                corruptedFrames++
+                                fb.compact(end)
+                                continue
+                            }
+                            if (expectedWidth == 0) {
+                                expectedWidth = bmp.width
+                                expectedHeight = bmp.height
+                            }
                             totalFrames++
                             updateFps()
                             if (totalFrames == 1L) Log.i(TAG, "First frame: ${bmp.width}x${bmp.height}")
                             onFrame(bmp)
+                        } else {
+                            corruptedFrames++
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "Decode: ${e.message}"); droppedFrames++
@@ -103,7 +131,7 @@ class MjpegDecoder(
     }
 
     fun halt() { running = false; interrupt() }
-    fun getStats() = "Frames: $totalFrames, Dropped: $droppedFrames"
+    fun getStats() = "Frames: $totalFrames, Dropped: $droppedFrames, Corrupted: $corruptedFrames"
 }
 
 /**

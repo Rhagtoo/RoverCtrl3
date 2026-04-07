@@ -103,7 +103,8 @@ unsigned long lastReconnectAttempt = 0, lastCmdTime = 0;
 // ═══ TCAL test sweep state ═══
 bool  tcalActive = false;
 bool  tcalDone = false;
-bool  calMode = false;            // calibration mode: ignores PAN/TILT commands
+bool  calMode = false;            // calibration mode: ignores TILT:0 commands
+unsigned long calModeExpireMs = 0; // auto-expire calMode after this time (0 = no expiry)
 int   tcalDirection = 0;
 float tcalStartAngle = 0.0f;
 float tcalEstimatedAngle = 0.0f;  // estimated angle during sweep (using current dps)
@@ -390,7 +391,7 @@ void parseCommand(const char* cmd) {
     if ((ptr = strstr(cmd, "TILT:")) != NULL)  { tilt = atoi(ptr + 5); ht = true; }
 
     // VCAL:<angle> — set virtual angle reference (calibration)
-    // Does NOT enter calMode — this is just setting a reference point
+    // Enters calMode for 10s to block cmdTick TILT:0 from overwriting target
     if ((ptr = strstr(cmd, "VCAL:")) != NULL) {
         float cal = atof(ptr + 5);
         cal = constrain(cal, 0.0f, 180.0f);
@@ -398,12 +399,15 @@ void parseCommand(const char* cmd) {
         tiltTargetAngle = cal;
         servoTilt.write(tiltCfg.neutral);  // force stop
         currentTiltPwm = tiltCfg.neutral;
-        Serial.printf("VCAL: virtual=%.1f\n", cal);
+        calMode = true;
+        calModeExpireMs = millis() + 60000;  // auto-expire in 60s
+        Serial.printf("VCAL: virtual=%.1f calMode=ON(60s)\n", cal);
     }
 
     // CEXIT — exit calibration mode, resume normal PAN/TILT control
     if (strstr(cmd, "CEXIT") != NULL) {
         calMode = false;
+        calModeExpireMs = 0;
         tcalActive = false;
         servoTilt.write(tiltCfg.neutral);
         currentTiltPwm = tiltCfg.neutral;
@@ -445,6 +449,7 @@ void parseCommand(const char* cmd) {
             tcalEstimatedAngle = 0.0f;
             tcalStartMs = millis();
             calMode = true;
+            calModeExpireMs = 0;  // no auto-expire during TCAL (cleared on done)
             Serial.printf("TCAL UP: start=%.1f speed=%d dur=%lums\n",
                 tcalStartAngle, tiltCfg.maxSpeed, (unsigned long)tcalDurationMs);
         } else if (strcmp(dir, "DN") == 0) {
@@ -454,6 +459,7 @@ void parseCommand(const char* cmd) {
             tcalEstimatedAngle = 0.0f;
             tcalStartMs = millis();
             calMode = true;
+            calModeExpireMs = 0;  // no auto-expire during TCAL
             Serial.printf("TCAL DN: start=%.1f speed=%d dur=%lums\n",
                 tcalStartAngle, tiltCfg.maxSpeed, (unsigned long)tcalDurationMs);
         } else if (strcmp(dir, "STOP") == 0 || strcmp(dir, "STO") == 0) {
@@ -465,20 +471,33 @@ void parseCommand(const char* cmd) {
         }
     }
 
-    // PAN/TILT — IGNORED in calMode (prevents interference during calibration)
-    if (calMode) {
-        lastCmdTime = millis();
-        return;  // skip PAN/TILT processing
-    }
-
+    // PAN always allowed. TILT gated by calMode.
     if (hp) {
         pan = constrain(pan, -90, 90);
         targetPan = map(pan, -90, 90, 180, 0);  // inverted
         panDirty = true;
     }
+
+    // calMode auto-expire check
+    if (calMode && calModeExpireMs > 0 && millis() > calModeExpireMs) {
+        calMode = false;
+        Serial.println("calMode expired");
+    }
+
     if (ht) {
         tilt = constrain(tilt, -90, 90);
-        tiltTargetAngle = constrain((float)map(tilt, -90, 90, 0, 180), TILT_MIN_ANGLE, TILT_MAX_ANGLE);
+        if (calMode) {
+            // In calMode: non-zero TILT = user touching joystick → exit calMode
+            if (tilt != 0) {
+                calMode = false;
+                calModeExpireMs = 0;
+                Serial.printf("calMode OFF (joystick TILT:%d)\n", tilt);
+                tiltTargetAngle = constrain((float)map(tilt, -90, 90, 0, 180), TILT_MIN_ANGLE, TILT_MAX_ANGLE);
+            }
+            // TILT:0 in calMode → ignored (cmdTick spam)
+        } else {
+            tiltTargetAngle = constrain((float)map(tilt, -90, 90, 0, 180), TILT_MIN_ANGLE, TILT_MAX_ANGLE);
+        }
     }
     lastCmdTime = millis();
 }
@@ -486,10 +505,19 @@ void parseCommand(const char* cmd) {
 // ═══ Servo Update — ~100Hz ═══
 void updateServos() {
     // PAN — standard positional servo
+    // PAN — positional servo with PWM smoothing
+    // Instead of jumping to targetPan, move max PWM_SMOOTH_STEP per tick (~100Hz)
+    // This eliminates servo jitter from noisy YOLO tracking commands
+    #define PAN_SMOOTH_STEP 3   // max degrees per 10ms tick = ~300°/s (fast enough)
     if (panDirty) {
-        servoPan.write(targetPan);
-        currentPan = targetPan;
-        panDirty = false;
+        int diff = targetPan - currentPan;
+        if (abs(diff) <= PAN_SMOOTH_STEP) {
+            currentPan = targetPan;
+        } else {
+            currentPan += (diff > 0) ? PAN_SMOOTH_STEP : -PAN_SMOOTH_STEP;
+        }
+        servoPan.write(currentPan);
+        if (currentPan == targetPan) panDirty = false;
     }
 
     // Time delta
@@ -514,7 +542,9 @@ void updateServos() {
             currentTiltPwm = tiltCfg.neutral;
             tcalActive = false;
             tcalDone = true;
-            calMode = false;  // resume normal PAN/TILT control
+            // calMode stays TRUE — user still calibrating (will Apply or Set next)
+            // Set 30s expire so user has time to enter degrees + Apply
+            calModeExpireMs = now + 30000;
             tcalElapsedMs = now - tcalStartMs;
             tiltTargetAngle = virtualTiltAngle;
             Serial.printf("TCAL done: %lums est=%.1f° %s (virtual=%.1f°)\n",
@@ -547,16 +577,29 @@ void updateServos() {
             virtualTiltAngle = constrain(virtualTiltAngle, TILT_MIN_ANGLE, TILT_MAX_ANGLE);
         }
     } else {
-        // Constant speed toward target
-        int speed = (error > 0) ? tiltCfg.maxSpeed : -tiltCfg.maxSpeed;
-        int pwm = tiltPwm(speed);
-        servoTilt.write(pwm);
-        currentTiltPwm = pwm;
+        // Proportional speed toward target (replaces bang-bang constant speed)
+        // Small error → slow movement, big error → full speed
+        // This reduces overshoot and oscillation at the target
+        float errorFrac = fabsf(error) / 30.0f;  // normalize: 30° = full speed
+        if (errorFrac > 1.0f) errorFrac = 1.0f;
+        int targetSpeed = (int)(errorFrac * tiltCfg.maxSpeed);
+        if (targetSpeed < 5) targetSpeed = 5;  // minimum to overcome stiction
+        int speed = (error > 0) ? targetSpeed : -targetSpeed;
 
-        // Open-loop integration with CORRECT speed mapping:
-        //   speed > 0: angle INCREASING = camera moves DOWN = with gravity = FASTER (dpsCamDn)
-        //   speed < 0: angle DECREASING = camera moves UP   = against gravity = SLOWER (dpsCamUp)
-        float speedFrac = (float)speed / (float)tiltCfg.maxSpeed; // +1 or -1
+        // Smooth PWM ramp: max change of 5 per tick (~100Hz = 500/s ramp)
+        #define TILT_PWM_RAMP 5
+        int targetPwm = tiltPwm(speed);
+        int pwmDiff = targetPwm - currentTiltPwm;
+        if (abs(pwmDiff) > TILT_PWM_RAMP) {
+            targetPwm = currentTiltPwm + ((pwmDiff > 0) ? TILT_PWM_RAMP : -TILT_PWM_RAMP);
+        }
+        servoTilt.write(targetPwm);
+        currentTiltPwm = targetPwm;
+
+        // Open-loop integration using ACTUAL applied speed (not target speed)
+        int actualSpeed = currentTiltPwm - tiltCfg.neutral;
+        if (TILT_INVERT) actualSpeed = -actualSpeed;
+        float speedFrac = (float)actualSpeed / (float)tiltCfg.maxSpeed;
         float dps = (speedFrac > 0) ? tiltCfg.dpsCamDn : tiltCfg.dpsCamUp;
         float actualDps = speedFrac * dps;
         virtualTiltAngle += actualDps * dt;

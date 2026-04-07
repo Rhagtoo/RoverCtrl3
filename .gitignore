@@ -33,3 +33,9 @@ google-services.json
 /rover/
 config.yaml
 requirements.txt
+
+# Python virtual env and cache
+venv/
+__pycache__/
+*.pyc
+*.backup
