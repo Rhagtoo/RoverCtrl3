@@ -16,6 +16,12 @@ import java.nio.channels.FileChannel
 // ──────────────────────────────────────────────────────────────────────────
 // ObjectTracker — YOLOv8n TFLite
 //
+// v3.0 FIXES:
+//   - Fix #1: INT8 model support — separate uint8 fill functions (was putFloat on 1-byte buffer!)
+//   - Fix #5: Kalman predict-only between detections (was feeding stale measurement)
+//   - Fix #7: @Volatile on tuning/sensitivity fields (cross-thread access)
+//   - Fix #9: Kalman initialize() with first detection (was transient from 0,0)
+//
 // v2.8 PERF:
 //   - Reused ByteBuffer for input (was allocating 4.9MB per frame!)
 //   - Reused IntArray for pixel extraction (was allocating 1.6MB per frame!)
@@ -31,8 +37,8 @@ class ObjectTracker(
     private val confThresh:  Float = 0.25f,
     private val iouThresh:   Float = 0.45f,
     useGpu:           Boolean = true,
-    private var panSensitivity:  Float = 1.0f,
-    private var tiltSensitivity: Float = 1.0f
+    @Volatile private var panSensitivity:  Float = 1.0f,
+    @Volatile private var tiltSensitivity: Float = 1.0f
 ) {
     private var isTracking = false
     private var framesSinceDetection = 0
@@ -47,10 +53,11 @@ class ObjectTracker(
 
     // ── Anti-jitter: deadzone + exponential scaling + rate limiting ──
     // Configurable via AppSettings sliders
-    private var DEADZONE = 0.04f
-    private var EXPO_POWER = 2.0f
+    // @Volatile: tuning updated from main thread, read from analysis thread
+    @Volatile private var DEADZONE = 0.04f
+    @Volatile private var EXPO_POWER = 2.0f
     private val EXPO_SCALE = 400f     // fixed: compensates quadratic shrinkage
-    private var MAX_DELTA_PER_FRAME = 8f
+    @Volatile private var MAX_DELTA_PER_FRAME = 8f
     private var lastPanOutput = 0f
     private var lastTiltOutput = 0f
 
@@ -204,7 +211,8 @@ class ObjectTracker(
                 isTracking = true
                 framesSinceDetection = 0
                 lastDetectionTime = currentTime
-                kalman.reset()
+                // Fix #9: initialize Kalman with actual detection (not 0,0)
+                kalman.initialize(detected)
                 lastDetection = detected
                 trackingConfidence = 1.0f
                 detected
@@ -217,18 +225,15 @@ class ObjectTracker(
                 null
             }
         } else {
-            lastDetection?.let {
-                val tracked = kalman.update(it, 0f)
-                if (tracked.cx in 0f..1f && tracked.cy in 0f..1f &&
-                    tracked.w in 0f..1f && tracked.h in 0f..1f) {
-                    tracked
-                } else {
-                    isTracking = false
-                    kalman.reset()
-                    null
-                }
-            } ?: run {
+            // Fix #5: predict-only (no stale measurement) — extrapolate using velocity
+            val predicted = kalman.predict()
+            if (predicted.cx in 0f..1f && predicted.cy in 0f..1f &&
+                predicted.w in 0f..1f && predicted.h in 0f..1f) {
+                trackingConfidence *= 0.95f  // decay confidence during prediction
+                predicted
+            } else {
                 isTracking = false
+                kalman.reset()
                 null
             }
         }
@@ -299,7 +304,8 @@ class ObjectTracker(
 
     // ── Input buffer conversion (reuses pre-allocated buffers) ────────────
 
-    private fun fillNhwcBuffer(bmp: Bitmap, buf: ByteBuffer, pixels: IntArray) {
+    // ── Float32 model: NHWC layout ──
+    private fun fillNhwcFloat(bmp: Bitmap, buf: ByteBuffer, pixels: IntArray) {
         val sz = modelInputSize
         buf.rewind()
         bmp.getPixels(pixels, 0, sz, 0, 0, sz, sz)
@@ -311,7 +317,8 @@ class ObjectTracker(
         buf.rewind()
     }
 
-    private fun fillNchwBuffer(bmp: Bitmap, buf: ByteBuffer, pixels: IntArray) {
+    // ── Float32 model: NCHW layout ──
+    private fun fillNchwFloat(bmp: Bitmap, buf: ByteBuffer, pixels: IntArray) {
         val sz = modelInputSize
         buf.rewind()
         bmp.getPixels(pixels, 0, sz, 0, 0, sz, sz)
@@ -319,6 +326,39 @@ class ObjectTracker(
         for (p in pixels) buf.putFloat(((p shr 8)  and 0xFF) / 255f)
         for (p in pixels) buf.putFloat(( p         and 0xFF) / 255f)
         buf.rewind()
+    }
+
+    // ── INT8 (uint8) model: NHWC layout — raw 0..255 bytes, no normalization ──
+    private fun fillNhwcInt8(bmp: Bitmap, buf: ByteBuffer, pixels: IntArray) {
+        val sz = modelInputSize
+        buf.rewind()
+        bmp.getPixels(pixels, 0, sz, 0, 0, sz, sz)
+        for (p in pixels) {
+            buf.put(((p shr 16) and 0xFF).toByte())
+            buf.put(((p shr 8)  and 0xFF).toByte())
+            buf.put(( p         and 0xFF).toByte())
+        }
+        buf.rewind()
+    }
+
+    // ── INT8 (uint8) model: NCHW layout — raw 0..255 bytes ──
+    private fun fillNchwInt8(bmp: Bitmap, buf: ByteBuffer, pixels: IntArray) {
+        val sz = modelInputSize
+        buf.rewind()
+        bmp.getPixels(pixels, 0, sz, 0, 0, sz, sz)
+        for (p in pixels) buf.put(((p shr 16) and 0xFF).toByte())
+        for (p in pixels) buf.put(((p shr 8)  and 0xFF).toByte())
+        for (p in pixels) buf.put(( p         and 0xFF).toByte())
+        buf.rewind()
+    }
+
+    /** Fill input buffer with correct format based on model type and layout */
+    private fun fillInputBuffer(bmp: Bitmap, buf: ByteBuffer, pixels: IntArray) {
+        if (modelIsInt8) {
+            if (inputNchw) fillNchwInt8(bmp, buf, pixels) else fillNhwcInt8(bmp, buf, pixels)
+        } else {
+            if (inputNchw) fillNchwFloat(bmp, buf, pixels) else fillNhwcFloat(bmp, buf, pixels)
+        }
     }
 
     private fun detect(frame: Bitmap): DetectionResult? {
@@ -340,8 +380,7 @@ class ObjectTracker(
 
             val buf = cachedInputBuffer!!
             val pixels = cachedPixels!!
-            if (inputNchw) fillNchwBuffer(scaled, buf, pixels)
-            else fillNhwcBuffer(scaled, buf, pixels)
+            fillInputBuffer(scaled, buf, pixels)
 
             val outShape = interp.getOutputTensor(0).shape()
             val dim1 = outShape[1]

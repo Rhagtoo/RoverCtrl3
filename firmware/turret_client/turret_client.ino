@@ -1,5 +1,10 @@
 /**
- * turret_client.ino v2.7.1
+ * turret_client.ino v2.7.2
+ *
+ * Changes from v2.7.1:
+ *   FIX: TSET parameter parsing — bare "D:" matched inside "DB:"/"DC:",
+ *        silently resetting dpsCamDn. Now searches ";D:" (semicolon prefix).
+ *        Same fix for N:, S:, U: to prevent future collisions.
  *
  * Changes from v2.7:
  *   FIX: VCAL now forces servo to neutral (prevents race condition jitter)
@@ -244,7 +249,7 @@ button{background:#0f0;color:#111;border:none;padding:8px 24px;cursor:pointer;fo
 #bar{width:100%;height:20px;background:#333;margin:8px 0;display:none}
 #fill{height:100%;width:0%;background:#0f0;transition:width 0.2s}
 </style></head><body>
-<h2>Turret OTA v2.7.1</h2>
+<h2>Turret OTA v2.7.2</h2>
 <input type='file' id='fw' accept='.bin'>
 <button onclick='upload()'>Flash</button>
 <div id='bar'><div id='fill'></div></div>
@@ -344,7 +349,7 @@ esp_err_t update_post_handler(httpd_req_t* r) {
 esp_err_t root_handler(httpd_req_t* r) {
     char b[256];
     snprintf(b, sizeof(b),
-        "XIAO Turret v2.7.1\n"
+        "XIAO Turret v2.7.2\n"
         "Heap: %lu\n"
         "Endpoints: /stream /capture /status /update\n",
         (unsigned long)ESP.getFreeHeap());
@@ -415,14 +420,17 @@ void parseCommand(const char* cmd) {
         Serial.printf("CEXIT: calMode=OFF virtual=%.1f\n", virtualTiltAngle);
     }
 
-    // TSET:N:<neutral>;S:<maxSpeed>;U:<dpsUp>;D:<dpsDn>;DB:<deadband>;DC:<driftCorr>
+    // TSET:;N:<neutral>;S:<maxSpeed>;U:<dpsUp>;D:<dpsDn>;DB:<deadband>;DC:<driftCorr>
+    // Fix #2: search ";KEY:" (with semicolon prefix) to avoid substring collisions
+    //   e.g. bare "D:" matched inside "DB:" → dpsCamDn silently reset to 10.0
+    //   CommandSender joins with ";" so every key is preceded by ";"
     if (strstr(cmd, "TSET:") != NULL) {
-        if ((ptr = strstr(cmd, "N:")) != NULL)  tiltCfg.neutral   = constrain(atoi(ptr + 2), 70, 110);
-        if ((ptr = strstr(cmd, "S:")) != NULL)  tiltCfg.maxSpeed  = constrain(atoi(ptr + 2), 10, 90);
-        if ((ptr = strstr(cmd, "U:")) != NULL)  tiltCfg.dpsCamUp  = constrain(atof(ptr + 2), 10.0f, 500.0f);
-        if ((ptr = strstr(cmd, "D:")) != NULL)  tiltCfg.dpsCamDn  = constrain(atof(ptr + 2), 10.0f, 500.0f);
-        if ((ptr = strstr(cmd, "DB:")) != NULL) tiltCfg.deadband  = constrain(atof(ptr + 3), 1.0f, 20.0f);
-        if ((ptr = strstr(cmd, "DC:")) != NULL) tiltCfg.driftCorr = constrain(atof(ptr + 3), 0.0f, 100.0f);
+        if ((ptr = strstr(cmd, ";N:")) != NULL)  tiltCfg.neutral   = constrain(atoi(ptr + 3), 70, 110);
+        if ((ptr = strstr(cmd, ";S:")) != NULL)  tiltCfg.maxSpeed  = constrain(atoi(ptr + 3), 10, 90);
+        if ((ptr = strstr(cmd, ";U:")) != NULL)  tiltCfg.dpsCamUp  = constrain(atof(ptr + 3), 10.0f, 500.0f);
+        if ((ptr = strstr(cmd, ";D:")) != NULL)  tiltCfg.dpsCamDn  = constrain(atof(ptr + 3), 10.0f, 500.0f);
+        if ((ptr = strstr(cmd, ";DB:")) != NULL) tiltCfg.deadband  = constrain(atof(ptr + 4), 1.0f, 20.0f);
+        if ((ptr = strstr(cmd, ";DC:")) != NULL) tiltCfg.driftCorr = constrain(atof(ptr + 4), 0.0f, 100.0f);
         Serial.printf("TSET: N=%d S=%d U=%.0f D=%.0f DB=%.1f DC=%.0f\n",
             tiltCfg.neutral, tiltCfg.maxSpeed, tiltCfg.dpsCamUp, tiltCfg.dpsCamDn,
             tiltCfg.deadband, tiltCfg.driftCorr);
@@ -656,7 +664,7 @@ void udpTask(void* p) {
 // ═══ Setup & Loop ═══
 void setup() {
     Serial.begin(115200);
-    Serial.println("\n=== Turret v2.7.1 — lean & fast ===");
+    Serial.println("\n=== Turret v2.7.2 — lean & fast ===");
 
     // Load tilt config from NVS (or defaults)
     loadTiltConfig();

@@ -30,6 +30,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.rhanet.roverctrl.R
+import org.rhanet.roverctrl.data.DetectionResult
 import org.rhanet.roverctrl.data.TrackingMode
 import org.rhanet.roverctrl.tracking.CalibrationData
 import org.rhanet.roverctrl.tracking.LaserTracker
@@ -330,30 +331,32 @@ class VideoFragment : Fragment() {
         val ft = latency.beginFrame()
         latency.mark(ft, LatencyTracker.Stage.DECODED)
         latency.mark(ft, LatencyTracker.Stage.INFERENCE_START)
+        handleTracking(bitmap, bitmap.width, bitmap.height, ft)
+        bitmap.recycle()
+        maybeUpdateLatencyHud()
+    }
 
-        val bitmapWidth = bitmap.width
-        val bitmapHeight = bitmap.height
+    /**
+     * Common tracking handler for both phone camera and XIAO frames.
+     * Fix #3: zeroes pan/tilt when object is lost (prevents stale commands).
+     * Fix #10: eliminates code duplication between processFrame/processXiaoFrame.
+     */
+    private fun handleTracking(bitmap: Bitmap, imgW: Int, imgH: Int, ft: LatencyTracker.FrameTimings) {
+        val mode = vm.trackMode.value
 
-        when (vm.trackMode.value) {
+        when (mode) {
             TrackingMode.LASER_DOT -> {
                 val r = laserTracker?.process(bitmap)
                 latency.mark(ft, LatencyTracker.Stage.INFERENCE_END)
                 if (r != null && r.found) {
                     vm.setPanTilt(r.panDelta.toInt(), r.tiltDelta.toInt())
-                    val label = r.detection?.label ?: ""
-                    vm.laserOn = label == "cat"
+                    vm.laserOn = (r.detection?.label ?: "") == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post {
-                        val ov = trackingOverlay()
-                        ov.sourceImageWidth = bitmapWidth
-                        ov.sourceImageHeight = bitmapHeight
-                        ov.detection = r.detection
-                    }
-                } else handler.post {
-                    val ov = trackingOverlay()
-                    ov.sourceImageWidth = bitmapWidth
-                    ov.sourceImageHeight = bitmapHeight
-                    ov.detection = null
+                    postOverlay(imgW, imgH, r.detection)
+                } else {
+                    // Fix #3: zero commands when tracking lost
+                    vm.setPanTilt(0, 0)
+                    postOverlay(imgW, imgH, null)
                 }
             }
             TrackingMode.OBJECT_TRACK -> {
@@ -361,26 +364,27 @@ class VideoFragment : Fragment() {
                 latency.mark(ft, LatencyTracker.Stage.INFERENCE_END)
                 if (r != null && r.found) {
                     vm.setPanTilt(r.panDelta.toInt(), r.tiltDelta.toInt())
-                    val label = r.detection?.label ?: ""
-                    vm.laserOn = label == "cat"
+                    vm.laserOn = (r.detection?.label ?: "") == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post {
-                        val ov = trackingOverlay()
-                        ov.sourceImageWidth = bitmapWidth
-                        ov.sourceImageHeight = bitmapHeight
-                        ov.detection = r.detection
-                    }
-                } else handler.post {
-                    val ov = trackingOverlay()
-                    ov.sourceImageWidth = bitmapWidth
-                    ov.sourceImageHeight = bitmapHeight
-                    ov.detection = null
+                    postOverlay(imgW, imgH, r.detection)
+                } else {
+                    // Fix #3: zero commands when tracking lost
+                    vm.setPanTilt(0, 0)
+                    postOverlay(imgW, imgH, null)
                 }
             }
             else -> {}
         }
-        bitmap.recycle()
-        maybeUpdateLatencyHud()
+    }
+
+    /** Post detection result to overlay on main thread */
+    private fun postOverlay(imgW: Int, imgH: Int, detection: DetectionResult?) {
+        handler.post {
+            val ov = trackingOverlay()
+            ov.sourceImageWidth = imgW
+            ov.sourceImageHeight = imgH
+            ov.detection = detection
+        }
     }
 
     // ── Overlay Controls ─────────────────────────────────────────────────
@@ -477,6 +481,10 @@ class VideoFragment : Fragment() {
             return
         }
 
+        // Fix #6: phone camera tracking controls turret servos but viewpoints differ.
+        // This only makes sense when phone and turret are roughly co-located.
+        // Prefer swapped mode (XIAO as source) for accurate closed-loop tracking.
+
         val ft = latency.beginFrame()
         val originalWidth = imageProxy.width
         val originalHeight = imageProxy.height
@@ -487,51 +495,8 @@ class VideoFragment : Fragment() {
         latency.mark(ft, LatencyTracker.Stage.DECODED)
         latency.mark(ft, LatencyTracker.Stage.INFERENCE_START)
 
-        when (mode) {
-            TrackingMode.LASER_DOT -> {
-                val r = laserTracker?.process(bitmap)
-                latency.mark(ft, LatencyTracker.Stage.INFERENCE_END)
-                if (r != null && r.found) {
-                    vm.setPanTilt(r.panDelta.toInt(), r.tiltDelta.toInt())
-                    val label = r.detection?.label ?: ""
-                    vm.laserOn = label == "cat"
-                    latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post {
-                        val ov = trackingOverlay()
-                        ov.sourceImageWidth = originalWidth
-                        ov.sourceImageHeight = originalHeight
-                        ov.detection = r.detection
-                    }
-                } else handler.post {
-                    val ov = trackingOverlay()
-                    ov.sourceImageWidth = originalWidth
-                    ov.sourceImageHeight = originalHeight
-                    ov.detection = null
-                }
-            }
-            TrackingMode.OBJECT_TRACK -> {
-                val r = objectTracker?.process(bitmap)
-                latency.mark(ft, LatencyTracker.Stage.INFERENCE_END)
-                if (r != null && r.found) {
-                    vm.setPanTilt(r.panDelta.toInt(), r.tiltDelta.toInt())
-                    val label = r.detection?.label ?: ""
-                    vm.laserOn = label == "cat"
-                    latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post {
-                        val ov = trackingOverlay()
-                        ov.sourceImageWidth = originalWidth
-                        ov.sourceImageHeight = originalHeight
-                        ov.detection = r.detection
-                    }
-                } else handler.post {
-                    val ov = trackingOverlay()
-                    ov.sourceImageWidth = originalWidth
-                    ov.sourceImageHeight = originalHeight
-                    ov.detection = null
-                }
-            }
-            else -> {}
-        }
+        // Fix #10: use common handler instead of duplicated tracking blocks
+        handleTracking(bitmap, originalWidth, originalHeight, ft)
         bitmap.recycle()
         maybeUpdateLatencyHud()
     }

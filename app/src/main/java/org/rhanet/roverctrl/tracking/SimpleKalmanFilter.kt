@@ -9,19 +9,21 @@ import org.rhanet.roverctrl.data.DetectionResult
  * Модель: постоянная скорость (velocity assumed constant between frames)
  * Q = process noise (как быстро может меняться реальное положение)
  * R = measurement noise (точность измерения детектора)
+ *
+ * v3.0 FIXES:
+ *   - Fix #4: velocity update now uses pre-update innovation (was using post-update residual)
+ *   - Fix #5: predict() — prediction step only (no measurement), for inter-detection tracking
+ *   - Fix #9: initialize(value) — set state directly without high-gain transient
  */
 class SimpleKalmanFilter(
-    private val processNoise: Float = 0.01f,   // Q: шум процесса (0.01 = 1% изменения)
-    private val measurementNoise: Float = 0.1f // R: шум измерения (0.1 = 10% ошибка)
+    private val processNoise: Float = 0.01f,   // Q: шум процесса
+    private val measurementNoise: Float = 0.1f // R: шум измерения
 ) {
-    // Состояние: [position, velocity]
     private var x = 0f      // оценка положения
     private var v = 0f      // оценка скорости
     private var p = 1f      // ковариация ошибки оценки
-    
-    // Время последнего обновления (мс)
     private var lastUpdateTime = System.currentTimeMillis()
-    
+
     /**
      * Обновить фильтр с новым измерением.
      * @param measurement Новое измерение (например, cx от детектора)
@@ -29,34 +31,53 @@ class SimpleKalmanFilter(
      * @return Сглаженное значение
      */
     fun update(measurement: Float, dt: Float = 0f): Float {
-        val actualDt = if (dt > 0f) dt else {
-            val now = System.currentTimeMillis()
-            val elapsed = (now - lastUpdateTime).toFloat() / 1000f
-            lastUpdateTime = now
-            elapsed.coerceAtLeast(0.001f) // минимум 1 мс
-        }
-        
-        // 1. Prediction (прогноз)
-        // x = x + v * dt
+        val actualDt = computeDt(dt)
+
+        // 1. Prediction
         x += v * actualDt
-        // p = p + Q
         p += processNoise
-        
+
         // 2. Kalman gain
         val k = p / (p + measurementNoise)
-        
-        // 3. Update (коррекция)
-        x += k * (measurement - x)
-        v += k * (measurement - x) / actualDt
+
+        // 3. Update
+        // Fix #4: compute innovation BEFORE updating x — old code used post-update
+        // residual which attenuated velocity by factor (1-K)
+        val innovation = measurement - x
+        x += k * innovation
+        v += k * innovation / actualDt
         p *= (1 - k)
-        
-        // Ограничиваем скорость (не более 0.5 за секунду)
-        val maxVelocity = 0.5f
-        v = v.coerceIn(-maxVelocity, maxVelocity)
-        
+
+        v = v.coerceIn(-MAX_VELOCITY, MAX_VELOCITY)
         return x
     }
-    
+
+    /**
+     * Prediction-only step — no measurement available.
+     * Extrapolates position using current velocity estimate.
+     * Process noise increases uncertainty (confidence drops).
+     * @return Predicted position
+     */
+    fun predict(dt: Float = 0f): Float {
+        val actualDt = computeDt(dt)
+        x += v * actualDt
+        p += processNoise
+        // Velocity decays slightly during prediction (object might change direction)
+        v *= VELOCITY_DECAY
+        return x
+    }
+
+    /**
+     * Initialize filter state directly (no transient from 0,0).
+     * Use when a new detection arrives after reset.
+     */
+    fun initialize(value: Float) {
+        x = value
+        v = 0f
+        p = measurementNoise  // reasonable initial uncertainty
+        lastUpdateTime = System.currentTimeMillis()
+    }
+
     /** Сбросить фильтр (объект потерян или новый объект) */
     fun reset() {
         x = 0f
@@ -64,20 +85,31 @@ class SimpleKalmanFilter(
         p = 1f
         lastUpdateTime = System.currentTimeMillis()
     }
-    
-    /** Текущее сглаженное положение */
+
     val position: Float get() = x
-    
-    /** Текущая оценка скорости (пикселей/сек) */
     val velocity: Float get() = v
-    
-    /** Уверенность фильтра (обратно пропорциональна ковариации) */
     val confidence: Float get() = 1f / (1f + p)
+
+    private fun computeDt(dt: Float): Float {
+        return if (dt > 0f) dt else {
+            val now = System.currentTimeMillis()
+            val elapsed = (now - lastUpdateTime).toFloat() / 1000f
+            lastUpdateTime = now
+            elapsed.coerceAtLeast(0.001f)
+        }
+    }
+
+    companion object {
+        private const val MAX_VELOCITY = 0.5f
+        private const val VELOCITY_DECAY = 0.98f
+    }
 }
 
 /**
- * Двумерный Kalman фильтр для координат (x, y).
- * Использует два независимых 1D фильтра.
+ * Двумерный Kalman фильтр для координат (x, y) + размеры (w, h).
+ * Использует четыре независимых 1D фильтра.
+ *
+ * v3.0: added predict() and initialize() methods.
  */
 class KalmanFilter2D(
     processNoise: Float = 0.01f,
@@ -85,37 +117,69 @@ class KalmanFilter2D(
 ) {
     private val filterX = SimpleKalmanFilter(processNoise, measurementNoise)
     private val filterY = SimpleKalmanFilter(processNoise, measurementNoise)
-    private val filterW = SimpleKalmanFilter(processNoise * 0.5f, measurementNoise * 2f) // Меньше меняется
+    private val filterW = SimpleKalmanFilter(processNoise * 0.5f, measurementNoise * 2f)
     private val filterH = SimpleKalmanFilter(processNoise * 0.5f, measurementNoise * 2f)
-    
-    /**
-     * Обновить фильтр с новым bounding box.
-     * @return Сглаженный DetectionResult с координатами в пределах 0..1
-     */
+
+    /** Cached label/confidence for predict() to return a complete DetectionResult */
+    private var lastLabel = ""
+    private var lastConfidence = 0f
+
     fun update(detection: DetectionResult, dt: Float = 0f): DetectionResult {
+        lastLabel = detection.label
+        lastConfidence = detection.confidence
+
         val cx = filterX.update(detection.cx, dt).coerceIn(0f, 1f)
         val cy = filterY.update(detection.cy, dt).coerceIn(0f, 1f)
         val w = filterW.update(detection.w, dt).coerceIn(0f, 1f)
         val h = filterH.update(detection.h, dt).coerceIn(0f, 1f)
-        
-        // Также ограничиваем размеры чтобы bbox не выходил за границы
+
         val maxW = 2f * minOf(cx, 1f - cx)
         val maxH = 2f * minOf(cy, 1f - cy)
-        val clampedW = w.coerceAtMost(maxW)
-        val clampedH = h.coerceAtMost(maxH)
-        
-        return detection.copy(cx = cx, cy = cy, w = clampedW, h = clampedH)
+
+        return detection.copy(cx = cx, cy = cy, w = w.coerceAtMost(maxW), h = h.coerceAtMost(maxH))
     }
-    
-    /** Сбросить все фильтры */
+
+    /**
+     * Prediction-only step — extrapolate using velocity, no measurement.
+     */
+    fun predict(dt: Float = 0f): DetectionResult {
+        val cx = filterX.predict(dt).coerceIn(0f, 1f)
+        val cy = filterY.predict(dt).coerceIn(0f, 1f)
+        val w = filterW.predict(dt).coerceIn(0f, 1f)
+        val h = filterH.predict(dt).coerceIn(0f, 1f)
+
+        val maxW = 2f * minOf(cx, 1f - cx)
+        val maxH = 2f * minOf(cy, 1f - cy)
+
+        return DetectionResult(
+            cx = cx, cy = cy,
+            w = w.coerceAtMost(maxW), h = h.coerceAtMost(maxH),
+            confidence = lastConfidence,
+            label = lastLabel
+        )
+    }
+
+    /**
+     * Initialize all filters with detection values (no transient from 0,0).
+     */
+    fun initialize(detection: DetectionResult) {
+        lastLabel = detection.label
+        lastConfidence = detection.confidence
+        filterX.initialize(detection.cx)
+        filterY.initialize(detection.cy)
+        filterW.initialize(detection.w)
+        filterH.initialize(detection.h)
+    }
+
     fun reset() {
         filterX.reset()
         filterY.reset()
         filterW.reset()
         filterH.reset()
+        lastLabel = ""
+        lastConfidence = 0f
     }
-    
-    /** Общая уверенность фильтра (среднее по всем измерениям) */
-    val confidence: Float get() = 
+
+    val confidence: Float get() =
         (filterX.confidence + filterY.confidence + filterW.confidence + filterH.confidence) / 4f
 }
