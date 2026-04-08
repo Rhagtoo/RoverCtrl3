@@ -1,3 +1,109 @@
+# v3.0.1 — Tracking Pipeline Fixes + PID Auto-Tune UI
+
+Target branch: feature/v3.0-tracking-tuning
+
+## PID Auto-Tune UI (Fix #4 — из списка улучшений)
+
+### Что уже было реализовано (но не подключено):
+- `PidAutoTuner.kt` — relay feedback test (Åström–Hägglund), 4 метода Z-N
+- `ObjectTracker.kt` — `startAutoTune()`, `abortAutoTune()`, relay bypass в `process()`
+- `fragment_video.xml` — кнопка `btn_auto_tune` (`"AT"`, visibility=gone)
+
+### Что добавлено:
+- **`showAutoTuneDialog()`** — диалог выбора метода, запуск/abort, progress HUD, показ результатов
+- **`startAutoTune()`** — подключение callbacks: progress → tvStatus, axis done → log, complete → result dialog, fail → toast
+- **`showAutoTuneResult()`** — диалог с полными результатами (Kp/Ki/Kd + Ku/Tu/amplitude/cycles), Keep/Revert
+- **`updateOverlayControlsVisibility()`** — кнопка AT видна только в OBJECT_TRACK mode
+- Import `PidAutoTuner`
+
+### Как пользоваться:
+1. Включить OBJECT_TRACK mode (спиннер → "YOLO")
+2. Навести камеру на объект (person или cat)
+3. Убедиться что bounding box стабильно отображается
+4. Нажать **AT** → выбрать метод (рекомендуется Tyreus-Luyben) → **Start**
+5. Камера будет осциллировать ~30 сек (PAN тест → TILT тест)
+6. По завершении — диалог с результатами, **Keep** или **Revert**
+
+### Методы настройки:
+| Метод | Характер | Когда использовать |
+|-------|----------|-------------------|
+| Ziegler-Nichols | Агрессивный, возможен overshoot | Быстрое отслеживание, не критичен overshoot |
+| Tyreus-Luyben | Сбалансированный (default) | Шумная система, сетевая задержка |
+| Some Overshoot | Промежуточный | Компромисс скорость/стабильность |
+| No Overshoot | Консервативный | Максимальная плавность |
+
+### Ограничения:
+- Tilt (CR серво) имеет integrator в plant → Z-N менее точен
+- Сетевая задержка ~50ms добавляет фазовый сдвиг → Tyreus-Luyben предпочтительнее
+- Требует стабильную детекцию объекта на протяжении всего теста (~30 сек)
+- При потере объекта >2 сек — тест прерывается автоматически
+
+## Исправленные баги
+
+### Fix #1: INT8 модель — BufferOverflowException (ObjectTracker.kt)
+- Буфер выделялся из расчёта 1 байт/канал для INT8, но `fillNhwcBuffer`/`fillNchwBuffer` всегда
+  писали `putFloat()` (4 байта) → crash при загрузке `yolov8n_int8.tflite`
+- Добавлены `fillNhwcInt8`/`fillNchwInt8` с `buf.put()` (raw 0–255 bytes)
+- Единый `fillInputBuffer()` выбирает реализацию по `modelIsInt8`
+
+### Fix #2: TSET parsing — коллизия D: ↔ DB:/DC: (turret_client.ino → v2.7.2)
+- `strstr(cmd, "D:")` находил `D` внутри `DB:5.0` → dpsCamDn тихо сбрасывался на 10°/s
+- Все ключи теперь ищутся с `;` префиксом: `";N:"`, `";S:"`, `";U:"`, `";D:"`, `";DB:"`, `";DC:"`
+- Совпадает с форматом CommandSender, который всегда ставит `;` перед каждым ключом
+
+### Fix #3: Потеря объекта не обнуляла команды (VideoFragment.kt)
+- При `r.found == false` не вызывался `vm.setPanTilt()` → cmdTick 50ms слал последние ненулевые команды
+- Добавлено `vm.setPanTilt(0, 0)` в else-ветку для обоих режимов (LASER_DOT, OBJECT_TRACK)
+
+### Fix #4: Kalman velocity — использовал post-update residual (SimpleKalmanFilter.kt)
+- Старый код: `x += k * (measurement - x)` затем `v += k * (measurement - x) / dt`
+  Второе `(measurement - x)` уже равно `(1-K) * innovation` → velocity получала ~9% сигнала
+- Новый код: `val innovation = measurement - x` → `x += k * innovation` → `v += k * innovation / dt`
+- Velocity prediction теперь реально работает
+
+### Fix #5: Kalman tracking — prediction-only между детекциями (SimpleKalmanFilter.kt + ObjectTracker.kt)
+- Старый код: `kalman.update(lastDetection)` на каждом кадре → один и тот же measurement → velocity → 0
+- Новый `predict()`: экстраполирует по velocity без measurement, P растёт (confidence падает)
+- Velocity декаёт ×0.98 при prediction (объект может остановиться)
+- `trackingConfidence *= 0.95f` между детекциями → быстрый возврат к detect()
+
+### Fix #7: Thread safety — @Volatile на tuning полях (ObjectTracker.kt)
+- `DEADZONE`, `EXPO_POWER`, `MAX_DELTA_PER_FRAME` обновляются из main thread (Flow),
+  читаются из analysisExecutor → формально data race на не-volatile полях
+- `panSensitivity`, `tiltSensitivity` — аналогично
+- Все помечены `@Volatile`
+
+### Fix #9: Kalman не инициализировался при первой детекции (SimpleKalmanFilter.kt + ObjectTracker.kt)
+- Старый код: `kalman.reset()` → state = (0, 0), затем predict() прыгает к реальной позиции
+- Новый `initialize(detection)`: ставит `x = detection.cx`, `p = measurementNoise` → без скачка
+- KalmanFilter2D.initialize() кеширует label/confidence для будущих predict()
+
+### Fix #10: Дублирование tracking кода (VideoFragment.kt)
+- `processFrame()` и `processXiaoFrame()` содержали идентичные блоки для LASER_DOT и OBJECT_TRACK
+- Выделены `handleTracking(bitmap, imgW, imgH, ft)` и `postOverlay(imgW, imgH, detection)`
+- ~60 строк copy-paste → 2 однострочных вызова
+
+### Fix #6: Предупреждение о viewpoint mismatch (VideoFragment.kt)
+- Non-swapped mode: YOLO на камере телефона → команды на турель XIAO
+  Viewpoints не совпадают если телефон и турель смотрят в разных направлениях
+- Добавлен комментарий-предупреждение в processFrame()
+
+## Затронутые файлы
+
+| Файл | Fixes |
+|------|-------|
+| `app/.../tracking/ObjectTracker.kt` | #1, #5, #7, #9 |
+| `app/.../tracking/SimpleKalmanFilter.kt` | #4, #5, #9 |
+| `app/.../ui/video/VideoFragment.kt` | #3, #6, #10, Auto-Tune UI |
+| `firmware/turret_client/turret_client.ino` | #2 (→ v2.7.2) |
+
+## Установка
+1. Распаковать `v3.0-tracking-fixes.zip` в корень репы (перезапишет 4 файла)
+2. Собрать APK
+3. Залить firmware v2.7.2 на XIAO через OTA (`http://192.168.4.2:81/update`)
+
+---
+
 # v3.0 — Live Tracking Tuning + YOLO INT8 Support
 
 Target branch: bugfixes-2026-04-05

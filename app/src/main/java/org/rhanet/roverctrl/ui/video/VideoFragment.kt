@@ -36,6 +36,7 @@ import org.rhanet.roverctrl.tracking.CalibrationData
 import org.rhanet.roverctrl.tracking.LaserTracker
 import org.rhanet.roverctrl.tracking.LatencyTracker
 import org.rhanet.roverctrl.tracking.ObjectTracker
+import org.rhanet.roverctrl.tracking.PidAutoTuner
 import org.rhanet.roverctrl.ui.RoverViewModel
 import org.rhanet.roverctrl.ui.control.JoystickView
 import androidx.navigation.fragment.findNavController
@@ -87,6 +88,7 @@ class VideoFragment : Fragment() {
     private lateinit var tvDriveLabel:      TextView
     private lateinit var tvCamLabel:        TextView
     private lateinit var btnLaserVideo:     ToggleButton
+    private lateinit var btnAutoTune:       Button
 
     private var swapped = false
     private var laserTracker:  LaserTracker?  = null
@@ -132,6 +134,7 @@ class VideoFragment : Fragment() {
         tvDriveLabel       = view.findViewById(R.id.tv_drive_label_video)
         tvCamLabel         = view.findViewById(R.id.tv_cam_label_video)
         btnLaserVideo      = view.findViewById(R.id.btn_laser_video)
+        btnAutoTune        = view.findViewById(R.id.btn_auto_tune)
 
         val toolbarVideo = view.findViewById<View>(R.id.toolbar_video)
         ViewCompat.setOnApplyWindowInsetsListener(toolbarVideo) { v, insets ->
@@ -157,9 +160,20 @@ class VideoFragment : Fragment() {
             findNavController().navigate(R.id.action_video_to_calibration)
         }
 
+        btnAutoTune.setOnClickListener { showAutoTuneDialog() }
+
+        // Load PID gains from settings and apply to ObjectTracker
+        val settings = vm.sensitivity.value
         CalibrationData.load(requireContext())?.let {
             vm.pidPan.kp = it.optimalPanKp()
             vm.pidTilt.kp = it.optimalTiltKp()
+        }
+        // AppSettings PID gains override CalibrationData if non-default
+        if (settings.pidPanKp != 100f || settings.pidPanKi != 0.2f) {
+            objectTracker?.updatePidGainsFull(
+                settings.pidPanKp, settings.pidPanKi, settings.pidPanKd,
+                settings.pidTiltKp, settings.pidTiltKi, settings.pidTiltKd
+            )
         }
 
         viewLifecycleOwner.lifecycleScope.launch {
@@ -415,6 +429,118 @@ class VideoFragment : Fragment() {
         tvDriveLabel.visibility   = showDrive
         tvCamLabel.visibility     = showCam
         btnLaserVideo.visibility  = showDrive
+        // Auto-tune only available in OBJECT_TRACK mode
+        btnAutoTune.visibility = if (mode == TrackingMode.OBJECT_TRACK) View.VISIBLE else View.GONE
+    }
+
+    // ── PID Auto-Tune Dialog ─────────────────────────────────────────────
+
+    private fun showAutoTuneDialog() {
+        val tracker = objectTracker ?: run {
+            Toast.makeText(requireContext(), "Start YOLO tracking first", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // If already running → offer abort
+        if (tracker.isAutoTuning()) {
+            android.app.AlertDialog.Builder(requireContext())
+                .setTitle("Auto-Tune Running")
+                .setMessage("Abort current test?")
+                .setPositiveButton("Abort") { _, _ ->
+                    tracker.abortAutoTune()
+                    btnAutoTune.text = "AT"
+                    tvStatus.text = "YOLO"
+                }
+                .setNegativeButton("Continue", null)
+                .show()
+            return
+        }
+
+        // Method selection dialog
+        val methods = PidAutoTuner.TuningMethod.entries
+        val labels = methods.map { it.label }.toTypedArray()
+
+        android.app.AlertDialog.Builder(requireContext())
+            .setTitle("PID Auto-Tune")
+            .setMessage("Aim camera at a visible object.\nRelay test ≈30s — camera will oscillate.")
+            .setSingleChoiceItems(labels, 1, null)  // default: Tyreus-Luyben
+            .setPositiveButton("Start") { dlg, _ ->
+                val selected = (dlg as android.app.AlertDialog).listView.checkedItemPosition
+                val method = methods[selected]
+                startAutoTune(tracker, method)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun startAutoTune(tracker: ObjectTracker, method: PidAutoTuner.TuningMethod) {
+        handler.post {
+            tvStatus.text = "AT:PAN…"
+            btnAutoTune.text = "STOP"
+        }
+
+        tracker.startAutoTune(
+            method = method,
+            onProgress = { axis, done, need ->
+                handler.post { tvStatus.text = "AT:${axis.name} $done/$need" }
+            },
+            onAxisDone = { result ->
+                handler.post {
+                    if (result.valid) {
+                        tvStatus.text = "AT:${result.axis}✓ → ${if (result.axis == PidAutoTuner.Axis.PAN) "TILT…" else "done"}"
+                    }
+                    Log.i(TAG, "AT ${result.axis}: Ku=%.0f Tu=%.3fs → Kp=%.0f Ki=%.2f Kd=%.1f (%d cyc)"
+                        .format(result.ku, result.tu, result.kp, result.ki, result.kd, result.cycles))
+                }
+            },
+            onComplete = { result ->
+                handler.post {
+                    btnAutoTune.text = "AT"
+                    tvStatus.text = "YOLO"
+                    showAutoTuneResult(tracker, result)
+                }
+            },
+            onFailed = { axis, reason ->
+                handler.post {
+                    btnAutoTune.text = "AT"
+                    tvStatus.text = "YOLO"
+                    Toast.makeText(requireContext(),
+                        "Auto-Tune failed ($axis): $reason", Toast.LENGTH_LONG).show()
+                }
+            }
+        )
+    }
+
+    private fun showAutoTuneResult(tracker: ObjectTracker, result: PidAutoTuner.FullResult) {
+        val msg = buildString {
+            append("Method: ${result.method.label}\n\n")
+            result.pan?.let { p ->
+                append("PAN:  Kp=%.0f  Ki=%.2f  Kd=%.1f".format(p.kp, p.ki, p.kd))
+                if (!p.valid) append("  ⚠ ${p.reason}")
+                append("\n  Ku=%.0f  Tu=%.3fs  amp=%.3f  (%d cyc)\n\n".format(p.ku, p.tu, p.oscillationAmplitude, p.cycles))
+            } ?: append("PAN: skipped\n\n")
+            result.tilt?.let { t ->
+                append("TILT: Kp=%.0f  Ki=%.2f  Kd=%.1f".format(t.kp, t.ki, t.kd))
+                if (!t.valid) append("  ⚠ ${t.reason}")
+                append("\n  Ku=%.0f  Tu=%.3fs  amp=%.3f  (%d cyc)\n".format(t.ku, t.tu, t.oscillationAmplitude, t.cycles))
+            } ?: append("TILT: skipped\n")
+            if (!result.isValid) append("\n⚠ Partial result — only valid axes applied")
+        }
+
+        android.app.AlertDialog.Builder(requireContext())
+            .setTitle(if (result.isValid) "Auto-Tune Complete ✓" else "Auto-Tune Partial")
+            .setMessage(msg)
+            .setPositiveButton("Keep") { _, _ ->
+                // Gains already applied by ObjectTracker.startAutoTune callback
+                Log.i(TAG, "Auto-tune gains applied")
+            }
+            .setNegativeButton("Revert") { _, _ ->
+                // Revert to defaults (kp=100, ki=0.2, kd=6 for both axes)
+                tracker.updatePidGainsFull(100f, 0.2f, 6f, 100f, 0.2f, 6f)
+                Log.i(TAG, "Auto-tune gains reverted to defaults")
+            }
+            .setCancelable(false)
+            .show()
     }
 
     // ── CameraX ──────────────────────────────────────────────────────────

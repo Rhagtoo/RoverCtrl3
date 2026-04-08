@@ -111,6 +111,9 @@ class ObjectTracker(
     private val pidPan  = PidController(kp = 100f, ki = 0.2f, kd = 6f, outMax = 100f)
     private val pidTilt = PidController(kp = 100f, ki = 0.2f, kd = 6f, outMax = 100f)
 
+    // ── PID Auto-Tune (relay feedback test) ──
+    private var autoTuner: PidAutoTuner? = null
+
     private var outputTransposed: Boolean? = null
     private var inputNchw: Boolean = false
     private var modelInputSize: Int = INPUT_SIZE
@@ -239,6 +242,13 @@ class ObjectTracker(
         }
 
         val finalDetection = detection ?: run {
+            // No detection this frame
+            val tuner = autoTuner
+            if (tuner != null && tuner.isRunning()) {
+                // Notify tuner — it tracks gap duration and aborts if too long
+                tuner.update(0f, false)
+                return TrackResult(false, 0f, 0f, null)
+            }
             pidPan.reset(); pidTilt.reset()
             lastPanOutput = 0f; lastTiltOutput = 0f
             return TrackResult(false, 0f, 0f, null)
@@ -257,7 +267,34 @@ class ObjectTracker(
         val errX = targetCx - 0.5f
         val errY = targetCy - 0.5f
 
-        // ── Anti-jitter pipeline: deadzone → expo scaling → PID → rate limit ──
+        // ── Auto-Tune mode: relay feedback bypasses entire anti-jitter pipeline ──
+        val tuner = autoTuner
+        if (tuner != null && tuner.isRunning()) {
+            val axis = tuner.currentAxis
+            val rawError = if (axis == PidAutoTuner.Axis.PAN) errX else errY
+            val relayCmd = tuner.update(rawError, true)
+
+            val pan: Float
+            val tilt: Float
+            if (axis == PidAutoTuner.Axis.PAN) {
+                pan = relayCmd.coerceIn(-100f, 100f)
+                tilt = 0f
+            } else {
+                pan = 0f
+                tilt = relayCmd.coerceIn(-100f, 100f)
+            }
+            lastPanOutput = pan
+            lastTiltOutput = tilt
+
+            detectCount++
+            if (detectCount % LOG_EVERY_N == 0L) {
+                val (done, need) = tuner.progress()
+                Log.d(TAG, "[AT:$axis] err=${"%.3f".format(rawError)} relay=${"%.0f".format(relayCmd)} $done/$need")
+            }
+            return TrackResult(true, pan, tilt, finalDetection)
+        }
+
+        // ── Normal mode: deadzone → expo scaling → PID → rate limit ──
         val absErrX = kotlin.math.abs(errX)
         val absErrY = kotlin.math.abs(errY)
 
@@ -521,10 +558,75 @@ class ObjectTracker(
         pidPan.reset(); pidTilt.reset()
     }
 
+    /** Full PID gain update (from auto-tune or manual) */
+    fun updatePidGainsFull(
+        panKp: Float, panKi: Float, panKd: Float,
+        tiltKp: Float, tiltKi: Float, tiltKd: Float
+    ) {
+        pidPan.kp = panKp; pidPan.ki = panKi; pidPan.kd = panKd
+        pidTilt.kp = tiltKp; pidTilt.ki = tiltKi; pidTilt.kd = tiltKd
+        pidPan.reset(); pidTilt.reset()
+        Log.i(TAG, "PID updated: pan(%.1f/%.2f/%.1f) tilt(%.1f/%.2f/%.1f)"
+            .format(panKp, panKi, panKd, tiltKp, tiltKi, tiltKd))
+    }
+
     fun updateSensitivity(panSens: Float, tiltSens: Float) {
         panSensitivity = panSens
         tiltSensitivity = tiltSens
     }
+
+    // ── Auto-Tune ─────────────────────────────────────────────────────────
+
+    /** Start PID auto-tune relay test. Tuner takes over pan/tilt output until complete. */
+    fun startAutoTune(
+        method: PidAutoTuner.TuningMethod = PidAutoTuner.TuningMethod.TYREUS_LUYBEN,
+        onProgress: ((PidAutoTuner.Axis, Int, Int) -> Unit)? = null,
+        onAxisDone: ((PidAutoTuner.AxisResult) -> Unit)? = null,
+        onComplete: ((PidAutoTuner.FullResult) -> Unit)? = null,
+        onFailed: ((PidAutoTuner.Axis, String) -> Unit)? = null
+    ) {
+        pidPan.reset(); pidTilt.reset()
+        lastPanOutput = 0f; lastTiltOutput = 0f
+
+        val tuner = PidAutoTuner(relayAmplitude = 45f, hysteresis = 0.015f, minCycles = 4)
+        tuner.method = method
+        tuner.onProgress = onProgress
+        tuner.onAxisDone = onAxisDone
+        tuner.onComplete = { result ->
+            autoTuner = null // exit auto-tune mode
+            // Apply gains if valid
+            if (result.panValid && result.pan != null) {
+                pidPan.kp = result.pan.kp
+                pidPan.ki = result.pan.ki
+                pidPan.kd = result.pan.kd
+            }
+            if (result.tiltValid && result.tilt != null) {
+                pidTilt.kp = result.tilt.kp
+                pidTilt.ki = result.tilt.ki
+                pidTilt.kd = result.tilt.kd
+            }
+            pidPan.reset(); pidTilt.reset()
+            onComplete?.invoke(result)
+        }
+        tuner.onFailed = { axis, reason ->
+            autoTuner = null
+            pidPan.reset(); pidTilt.reset()
+            onFailed?.invoke(axis, reason)
+        }
+        autoTuner = tuner
+        tuner.startFull()
+        Log.i(TAG, "Auto-tune started (${method.label})")
+    }
+
+    fun abortAutoTune() {
+        autoTuner?.abort()
+        autoTuner = null
+        pidPan.reset(); pidTilt.reset()
+        lastPanOutput = 0f; lastTiltOutput = 0f
+        Log.i(TAG, "Auto-tune aborted")
+    }
+
+    fun isAutoTuning(): Boolean = autoTuner?.isRunning() == true
 
     fun isClosed(): Boolean = closed
 
