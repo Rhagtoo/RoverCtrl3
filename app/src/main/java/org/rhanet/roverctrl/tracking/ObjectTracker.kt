@@ -61,6 +61,13 @@ class ObjectTracker(
     private var lastPanOutput = 0f
     private var lastTiltOutput = 0f
 
+    // ── Acquisition ramp: soften initial tracking to prevent tilt overshoot ──
+    // CR servo tilt is rate-controlled — target angle runs ahead of physical position
+    // if commands ramp too fast. On first detection, limit output for RAMP_FRAMES.
+    private var acquisitionFrame = 0          // counts up from 0 when tracking acquired
+    private val RAMP_FRAMES = 25             // ~0.8s at 30fps: gradual increase
+    private val TILT_RATE_FACTOR = 0.4f      // tilt rate limit = pan × this factor
+
     /** Update tracking tuning from AppSettings (called from VideoFragment on settings change) */
     fun updateTrackingTuning(deadzone: Float, expo: Float, rateLimit: Float) {
         DEADZONE = deadzone.coerceIn(0.01f, 0.15f)
@@ -211,6 +218,7 @@ class ObjectTracker(
         val detection = if (shouldDetect) {
             val detected = detect(frame)
             if (detected != null && detected.confidence >= minDetectionConfidence) {
+                val wasTracking = isTracking
                 isTracking = true
                 framesSinceDetection = 0
                 lastDetectionTime = currentTime
@@ -218,6 +226,14 @@ class ObjectTracker(
                 kalman.initialize(detected)
                 lastDetection = detected
                 trackingConfidence = 1.0f
+                // Reset acquisition ramp on new tracking start
+                if (!wasTracking) {
+                    acquisitionFrame = 0
+                    lastPanOutput = 0f
+                    lastTiltOutput = 0f
+                    pidPan.reset()
+                    pidTilt.reset()
+                }
                 detected
             } else {
                 isTracking = false
@@ -322,9 +338,17 @@ class ObjectTracker(
             pidTilt.reset()
         }
 
-        // Rate limiter: max ±MAX_DELTA_PER_FRAME change between frames
-        pan  = (pan.coerceIn(lastPanOutput - MAX_DELTA_PER_FRAME, lastPanOutput + MAX_DELTA_PER_FRAME))
-        tilt = (tilt.coerceIn(lastTiltOutput - MAX_DELTA_PER_FRAME, lastTiltOutput + MAX_DELTA_PER_FRAME))
+        // ── Rate limiter with acquisition ramp + separate tilt limit ──
+        // CR servo tilt: target angle runs ahead of physical position if commands
+        // ramp too fast → massive overshoot. Limit tilt rate to TILT_RATE_FACTOR × pan rate.
+        // On tracking acquisition: gradually ramp up rate limit over RAMP_FRAMES.
+        acquisitionFrame++
+        val rampFactor = (acquisitionFrame.toFloat() / RAMP_FRAMES).coerceIn(0.1f, 1.0f)
+        val panRate  = MAX_DELTA_PER_FRAME * rampFactor
+        val tiltRate = MAX_DELTA_PER_FRAME * TILT_RATE_FACTOR * rampFactor
+
+        pan  = pan.coerceIn(lastPanOutput - panRate, lastPanOutput + panRate)
+        tilt = tilt.coerceIn(lastTiltOutput - tiltRate, lastTiltOutput + tiltRate)
         lastPanOutput = pan
         lastTiltOutput = tilt
 
