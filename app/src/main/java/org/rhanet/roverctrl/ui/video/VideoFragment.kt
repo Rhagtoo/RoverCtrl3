@@ -454,7 +454,7 @@ class VideoFragment : Fragment() {
 
         android.app.AlertDialog.Builder(requireContext())
             .setTitle("PID Auto-Tune")
-            .setMessage("Aim camera at a visible object.\nRelay test ≈30s — camera will oscillate.")
+            .setMessage("Camera will freeze and wait for you to enter frame.\nOnce detected, relay test starts (~30s, camera oscillates).")
             .setSingleChoiceItems(labels, 1, null)  // default: Tyreus-Luyben
             .setPositiveButton("Start") { dlg, _ ->
                 val selected = (dlg as android.app.AlertDialog).listView.checkedItemPosition
@@ -467,7 +467,7 @@ class VideoFragment : Fragment() {
 
     private fun startAutoTune(tracker: ObjectTracker, method: PidAutoTuner.TuningMethod) {
         handler.post {
-            tvStatus.text = "AT:PAN…"
+            tvStatus.text = "AT: aim camera…"
             btnAutoTune.text = "STOP"
         }
 
@@ -479,7 +479,8 @@ class VideoFragment : Fragment() {
             onAxisDone = { result ->
                 handler.post {
                     if (result.valid) {
-                        tvStatus.text = "AT:${result.axis}✓ → ${if (result.axis == PidAutoTuner.Axis.PAN) "TILT…" else "done"}"
+                        // Next axis starts in WAITING
+                        tvStatus.text = "AT:${result.axis}✓ → aim camera…"
                     }
                     Log.i(TAG, "AT ${result.axis}: Ku=%.0f Tu=%.3fs → Kp=%.0f Ki=%.2f Kd=%.1f (%d cyc)"
                         .format(result.ku, result.tu, result.kp, result.ki, result.kd, result.cycles))

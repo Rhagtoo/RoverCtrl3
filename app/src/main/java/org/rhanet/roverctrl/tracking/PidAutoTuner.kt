@@ -32,7 +32,9 @@ class PidAutoTuner(
     private val hysteresis: Float = 0.015f,       // error dead band to prevent chattering
     private val minCycles: Int = 4,               // min full oscillation cycles
     private val maxDurationMs: Long = 15_000L,    // per-axis timeout
-    private val settleMs: Long = 2000L            // settle time before recording
+    private val settleMs: Long = 2000L,           // settle time before recording
+    private val waitingTimeoutMs: Long = 30_000L, // max wait for first detection
+    private val maxDetectionGapMs: Long = 4000L   // max gap during active test (increased from 2s)
 ) {
     companion object {
         private const val TAG = "PidAutoTuner"
@@ -64,7 +66,7 @@ class PidAutoTuner(
     }
 
     enum class Axis { PAN, TILT }
-    enum class State { IDLE, SETTLING, RUNNING, COMPLETE, FAILED }
+    enum class State { IDLE, WAITING, SETTLING, RUNNING, COMPLETE, FAILED }
 
     enum class TuningMethod(val label: String) {
         ZIEGLER_NICHOLS("Z-N (aggressive)"),
@@ -124,7 +126,7 @@ class PidAutoTuner(
 
     // Detection loss handling
     private var lastDetectionMs = 0L
-    private val maxDetectionGapMs = 2000L
+    private var waitingStartMs = 0L  // when WAITING state started
 
     // ── Lifecycle ──
 
@@ -139,12 +141,16 @@ class PidAutoTuner(
         startAxis(axis)
     }
 
-    fun isRunning() = state == State.SETTLING || state == State.RUNNING
+    fun isRunning() = state == State.WAITING || state == State.SETTLING || state == State.RUNNING
+
+    /** True while in WAITING state (camera should freeze) */
+    fun isWaiting() = state == State.WAITING
 
     fun abort() {
         if (isRunning()) {
+            val was = state
             state = State.IDLE
-            Log.i(TAG, "Aborted during $currentAxis")
+            Log.i(TAG, "Aborted during $currentAxis (was $was)")
         }
     }
 
@@ -161,12 +167,31 @@ class PidAutoTuner(
 
         val now = System.currentTimeMillis()
 
+        // ── WAITING state: camera frozen, waiting for first detection ──
+        if (state == State.WAITING) {
+            if (now - waitingStartMs > waitingTimeoutMs) {
+                fail("No detection within ${waitingTimeoutMs / 1000}s — aim camera at object")
+                return 0f
+            }
+            if (detected) {
+                // First detection! Transition to SETTLING
+                state = State.SETTLING
+                startMs = now
+                settleEndMs = now + settleMs
+                lastDetectionMs = now
+                Log.i(TAG, "Detection acquired for $currentAxis, settling ${settleMs}ms")
+            }
+            return 0f  // hold still — camera stays put
+        }
+
+        // ── SETTLING / RUNNING states ──
+
         // Detection loss check
         if (detected) {
             lastDetectionMs = now
         } else {
             if (lastDetectionMs > 0 && (now - lastDetectionMs) > maxDetectionGapMs) {
-                fail("Detection lost for ${maxDetectionGapMs}ms")
+                fail("Detection lost for ${maxDetectionGapMs / 1000}s")
                 return 0f
             }
             return 0f // hold still while detection lost
@@ -238,11 +263,13 @@ class PidAutoTuner(
 
     private fun startAxis(axis: Axis) {
         currentAxis = axis
-        state = State.SETTLING
+        // Start in WAITING — camera freezes, waits for first detection
+        state = State.WAITING
         val now = System.currentTimeMillis()
-        startMs = now
-        settleEndMs = now + settleMs
-        lastDetectionMs = now
+        waitingStartMs = now
+        startMs = 0L  // will be set when WAITING → SETTLING
+        settleEndMs = 0L
+        lastDetectionMs = 0L  // no detection yet
         relaySign = 1f
         zeroCrossings.clear()
         halfCyclePeaks.clear()
@@ -250,7 +277,7 @@ class PidAutoTuner(
         currentPeakMax = -Float.MAX_VALUE
         currentPeakMin = Float.MAX_VALUE
         trackingMax = true
-        Log.i(TAG, "Start $axis: relay=±$relayAmplitude hyst=$hysteresis settle=${settleMs}ms")
+        Log.i(TAG, "Start $axis: WAITING for detection (timeout ${waitingTimeoutMs/1000}s)")
     }
 
     private fun computeRelay(error: Float): Float {
