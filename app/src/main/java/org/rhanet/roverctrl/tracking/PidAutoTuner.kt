@@ -36,6 +36,31 @@ class PidAutoTuner(
 ) {
     companion object {
         private const val TAG = "PidAutoTuner"
+
+        fun gainsFromKuTu(ku: Float, tu: Float, method: TuningMethod): Triple<Float, Float, Float> {
+            return when (method) {
+                TuningMethod.ZIEGLER_NICHOLS -> Triple(
+                    0.6f * ku,                  // Kp
+                    1.2f * ku / tu,             // Ki
+                    0.075f * ku * tu            // Kd
+                )
+                TuningMethod.TYREUS_LUYBEN -> Triple(
+                    0.45f * ku,
+                    0.45f * ku / (2.2f * tu),
+                    0.45f * ku * tu / 6.3f
+                )
+                TuningMethod.SOME_OVERSHOOT -> Triple(
+                    0.33f * ku,
+                    0.66f * ku / tu,
+                    0.11f * ku * tu
+                )
+                TuningMethod.NO_OVERSHOOT -> Triple(
+                    0.2f * ku,
+                    0.4f * ku / tu,
+                    0.067f * ku * tu
+                )
+            }
+        }
     }
 
     enum class Axis { PAN, TILT }
@@ -326,31 +351,4 @@ class PidAutoTuner(
         onFailed?.invoke(currentAxis, reason)
     }
 
-    companion object GainComputation {
-
-        fun gainsFromKuTu(ku: Float, tu: Float, method: TuningMethod): Triple<Float, Float, Float> {
-            return when (method) {
-                TuningMethod.ZIEGLER_NICHOLS -> Triple(
-                    0.6f * ku,                  // Kp
-                    1.2f * ku / tu,             // Ki
-                    0.075f * ku * tu            // Kd
-                )
-                TuningMethod.TYREUS_LUYBEN -> Triple(
-                    0.45f * ku,
-                    0.45f * ku / (2.2f * tu),
-                    0.45f * ku * tu / 6.3f
-                )
-                TuningMethod.SOME_OVERSHOOT -> Triple(
-                    0.33f * ku,
-                    0.66f * ku / tu,
-                    0.11f * ku * tu
-                )
-                TuningMethod.NO_OVERSHOOT -> Triple(
-                    0.2f * ku,
-                    0.4f * ku / tu,
-                    0.067f * ku * tu
-                )
-            }
-        }
-    }
 }
