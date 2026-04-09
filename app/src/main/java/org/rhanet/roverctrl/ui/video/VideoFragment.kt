@@ -162,18 +162,10 @@ class VideoFragment : Fragment() {
 
         btnAutoTune.setOnClickListener { showAutoTuneDialog() }
 
-        // Load PID gains from settings and apply to ObjectTracker
-        val settings = vm.sensitivity.value
+        // Load PID gains from calibration data
         CalibrationData.load(requireContext())?.let {
             vm.pidPan.kp = it.optimalPanKp()
             vm.pidTilt.kp = it.optimalTiltKp()
-        }
-        // AppSettings PID gains override CalibrationData if non-default
-        if (settings.pidPanKp != 100f || settings.pidPanKi != 0.2f) {
-            objectTracker?.updatePidGainsFull(
-                settings.pidPanKp, settings.pidPanKi, settings.pidPanKd,
-                settings.pidTiltKp, settings.pidTiltKi, settings.pidTiltKd
-            )
         }
 
         viewLifecycleOwner.lifecycleScope.launch {
@@ -458,7 +450,7 @@ class VideoFragment : Fragment() {
 
         // Method selection dialog
         val methods = PidAutoTuner.TuningMethod.entries
-        val labels = methods.map { it.label }.toTypedArray()
+        val labels: Array<CharSequence> = methods.map { it.label as CharSequence }.toTypedArray()
 
         android.app.AlertDialog.Builder(requireContext())
             .setTitle("PID Auto-Tune")

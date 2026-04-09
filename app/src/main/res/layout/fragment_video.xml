@@ -303,6 +303,15 @@
             android:text="Cal"
             android:textSize="11sp" />
 
+        <Button
+            android:id="@+id/btn_auto_tune"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="AT"
+            android:textSize="11sp"
+            android:visibility="gone"
+            android:layout_marginStart="4dp" />
+
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
