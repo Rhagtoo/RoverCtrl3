@@ -24,9 +24,9 @@ import kotlin.math.*
  * ═══════════════════════════════════════════════════════════════════════
  */
 class OdometryTracker(
-    private val wheelDiameter: Float = 0.065f,     // м — диаметр колеса
-    private val wheelBase: Float = 0.160f,          // м — расстояние между осями (не колёсами!)
-    private val maxSteerAngleDeg: Float = 30f,      // макс угол поворота колёс (градусы)
+    private val wheelDiameter: Float = 0.07f,      // диаметр колеса: длина окружности 22 см → 0.22/π ≈ 0.07 м
+    private val wheelBase: Float = 0.160f,          // м — расстояние между осями (ИЗМЕРИТЬ!)
+    private val maxSteerAngleDeg: Float = 18f,      // макс угол поворота колёс (градусы) после изменения сервопривода 60-120
 ) {
     data class Pose(val x: Float, val y: Float, val headingRad: Float)
 
@@ -84,7 +84,7 @@ class OdometryTracker(
             velocity = avgRpm / 60f * circumference
         } else {
             // Fallback: оценка из % мощности (грубо)
-            val vMax = 0.5f  // предполагаемая макс скорость м/с
+            val vMax = 2.0f  // предполагаемая макс скорость м/с (для wheelDiameter=0.07м)
             velocity = spdPct / 100f * vMax
         }
 

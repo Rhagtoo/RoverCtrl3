@@ -167,6 +167,13 @@ class RoverViewModel : ViewModel() {
     // ── Odometry ──────────────────────────────────────────────────────────
 
     private fun updateOdometry(data: TelemetryData) {
+        // Логирование для отладки одометрии (раз в 5 секунд)
+        if (System.currentTimeMillis() % 5000 < 100) {
+            Log.d("ODOM_DEBUG", "str=${data.str}, rpmL=${data.rpmL}, " +
+                                "rpmR=${data.rpmR}, spd=${data.spd}, " +
+                                "dist=${odometry.distanceMeters}")
+        }
+        
         odometry.update(
             rpmL   = data.rpmL,
             rpmR   = data.rpmR,

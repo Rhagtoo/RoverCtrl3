@@ -108,7 +108,7 @@ void parseCommand(const char* cmd) {
     if (strstr(ptr, "GEAR:")) gear = constrain(atoi(strstr(ptr, "GEAR:") + 5), 1, 2);
 
     str = constrain(str, -100, 100);
-    steerServo.write(map(str, -100, 100, 40, 140));
+    steerServo.write(map(str, -100, 100, 60, 120));  // уменьшен диапазон
     lastStr = str;
 
     int maxFwd = (gear == 1) ? 50 : 100;
