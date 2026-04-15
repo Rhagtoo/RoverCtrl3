@@ -19,7 +19,7 @@ data class TelemetryData(
     val rpmR: Float = Float.NaN
 ) {
     companion object {
-        private const val WHEEL_DIAMETER_M = 0.07f  // диаметр колеса: длина окружности 22 см → 0.22/π ≈ 0.07 м
+        private const val WHEEL_DIAMETER_M = 0.068f  // диаметр колеса с резиной 6.8 см = 0.068 м
     }
 
     /** Реальная линейная скорость (м/с) из RPM энкодеров */
