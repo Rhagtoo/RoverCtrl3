@@ -31,8 +31,10 @@ const IPAddress AP_SUBNET(255, 255, 255, 0);
 #define TELEM_PORT         4211
 #define MOTOR_WATCHDOG_MS  500
 #define TELEM_INTERVAL_MS  500
-#define ENCODER_PPR        440
+#define ENCODER_PPR        220
 #define RPM_SAMPLE_MS      200
+#define MOTOR_RAMP_STEP    4    // % за шаг
+#define MOTOR_RAMP_MS      20   // интервал шага, мс
 
 WiFiUDP udp;
 WiFiUDP udpTelem;
@@ -41,6 +43,7 @@ Servo steerServo;
 volatile int16_t encCountL = 0, encCountR = 0;
 float rpmL = 0.0f, rpmR = 0.0f;
 int lastFwd = 0, lastStr = 0;
+int targetFwd = 0, currentFwd = 0;
 bool laserOn = false;
 IPAddress remoteIP;
 uint16_t remotePort = 0;
@@ -85,7 +88,7 @@ void updateRpm() {
     }
 }
 
-void setMotor(int fwd) {
+void applyMotorPwm(int fwd) {
     int pwm = constrain(abs(fwd) * 255 / 100, 0, 255);
     if (fwd > 0) { digitalWrite(MOTOR_IN1, HIGH); digitalWrite(MOTOR_IN2, LOW); }
     else if (fwd < 0) { digitalWrite(MOTOR_IN1, LOW); digitalWrite(MOTOR_IN2, HIGH); }
@@ -93,9 +96,22 @@ void setMotor(int fwd) {
     analogWrite(PWM_LEFT, pwm); analogWrite(PWM_RIGHT, pwm);
 }
 
+void updateMotorRamp() {
+    static unsigned long lastRampTime = 0;
+    unsigned long now = millis();
+    if ((now - lastRampTime) < MOTOR_RAMP_MS) return;
+    lastRampTime = now;
+
+    if (currentFwd < targetFwd) currentFwd = min(currentFwd + MOTOR_RAMP_STEP, targetFwd);
+    else if (currentFwd > targetFwd) currentFwd = max(currentFwd - MOTOR_RAMP_STEP, targetFwd);
+
+    applyMotorPwm(currentFwd);
+    lastFwd = currentFwd;
+}
+
 void stopMotors() {
     digitalWrite(MOTOR_IN1, LOW); digitalWrite(MOTOR_IN2, LOW);
-    analogWrite(PWM_LEFT, 0); analogWrite(PWM_RIGHT, 0); lastFwd = 0;
+    analogWrite(PWM_LEFT, 0); analogWrite(PWM_RIGHT, 0); lastFwd = 0; currentFwd = 0; targetFwd = 0;
 }
 
 void parseCommand(const char* cmd) {
@@ -113,7 +129,7 @@ void parseCommand(const char* cmd) {
 
     int maxFwd = (gear == 1) ? 50 : 100;
     fwd = constrain(fwd, -maxFwd, maxFwd);
-    setMotor(fwd); lastFwd = fwd;
+    targetFwd = fwd;
 
     laserOn = (laser == 1);
     digitalWrite(LASER_PIN, laserOn ? HIGH : LOW);
@@ -208,6 +224,7 @@ void loop() {
     }
     ArduinoOTA.handle();
     httpServer.handleClient();
+    updateMotorRamp();
     updateRpm(); checkWatchdog(); sendTelemetry(); delay(5);
 }
 
