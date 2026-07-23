@@ -30,8 +30,10 @@ class ControlFragment : Fragment() {
     private val vm: RoverViewModel by activityViewModels()
     private val handler = Handler(Looper.getMainLooper())
 
-    private lateinit var joystickDrive: JoystickView
-    private lateinit var joystickCam:   JoystickView
+    // Слайдеры вместо джойстиков
+    private lateinit var sliderSteer:    SliderView   // горизонтальный: лево-право
+    private lateinit var sliderThrottle: SliderView   // вертикальный: вперёд-назад
+
     private lateinit var btnLaser:      ToggleButton
     private lateinit var btnGyroTilt:   ToggleButton
     private lateinit var btnPip:        ToggleButton
@@ -46,7 +48,6 @@ class ControlFragment : Fragment() {
     private lateinit var tvOdom:        TextView
     private lateinit var tvDist:        TextView    // v1.3: HC-SR04
     private lateinit var tvGyroDebug:   TextView
-    private lateinit var tvCamLabel:    TextView
 
     private lateinit var pipContainer: FrameLayout
     private lateinit var ivTurretPip:  ImageView
@@ -57,13 +58,17 @@ class ControlFragment : Fragment() {
     private var gyroCtrl: GyroTiltController? = null
     private var gyroTickJob: Job? = null
 
+    // Текущие значения слайдеров
+    private var steerVal = 0f
+    private var throttleVal = 0f
+
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View = inflater.inflate(R.layout.fragment_control, container, false)
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        joystickDrive = view.findViewById(R.id.joystick_drive)
-        joystickCam   = view.findViewById(R.id.joystick_cam)
+        sliderSteer   = view.findViewById(R.id.slider_steer)
+        sliderThrottle = view.findViewById(R.id.slider_throttle)
         btnLaser      = view.findViewById(R.id.btn_laser)
         btnGyroTilt   = view.findViewById(R.id.btn_gyro_tilt)
         btnPip        = view.findViewById(R.id.btn_pip)
@@ -78,7 +83,6 @@ class ControlFragment : Fragment() {
         tvOdom        = view.findViewById(R.id.tv_odom)
         tvDist        = view.findViewById(R.id.tv_dist)   // v1.3: HC-SR04
         tvGyroDebug   = view.findViewById(R.id.tv_gyro_debug)
-        tvCamLabel    = view.findViewById(R.id.tv_cam_label)
         pipContainer  = view.findViewById(R.id.pip_container)
         ivTurretPip   = view.findViewById(R.id.iv_turret_pip)
         tvTurretFps   = view.findViewById(R.id.tv_turret_fps)
@@ -95,8 +99,13 @@ class ControlFragment : Fragment() {
         }
 
         vm.loadSettings(requireContext())
-        setupDriveJoystick()
-        setupCameraJoystick()
+
+        // Настройка ориентации слайдеров
+        sliderSteer.orientation = SliderView.Orientation.HORIZONTAL
+        sliderThrottle.orientation = SliderView.Orientation.VERTICAL
+
+        setupSteerSlider()
+        setupThrottleSlider()
         setupLaser()
         setupGyroTilt()
         setupPip()
@@ -106,24 +115,30 @@ class ControlFragment : Fragment() {
         observeTurretStream()
     }
 
-    private fun setupDriveJoystick() {
-        joystickDrive.onMove = { x, y ->
-            val s = vm.sensitivity.value
-            val fwd = (y * 100 * s.driveSpeedSens).toInt().coerceIn(-100, 100)
-            val str = (x * 100 * s.driveSteerSens).toInt().coerceIn(-100, 100)
-            vm.setDriveCmd(fwd, str, fwd)
+    // ── Горизонтальный слайдер: лево-право ─────────────────────────────
+    private fun setupSteerSlider() {
+        sliderSteer.onMove = { value ->
+            steerVal = value
+            sendDriveCmd()
         }
     }
 
-    private fun setupCameraJoystick() {
-        joystickCam.onMove = { x, y ->
-            if (vm.trackMode.value == TrackingMode.MANUAL) {
-                val s = vm.sensitivity.value
-                val pan  = (x * 100 * s.camPanSens).toInt().coerceIn(-100, 100)
-                val tilt = (y * 100 * s.camTiltSens).toInt().coerceIn(-100, 100)
-                vm.setPanTilt(pan, tilt)
-            }
+    // ── Вертикальный слайдер: вперёд-назад ─────────────────────────────
+    private fun setupThrottleSlider() {
+        sliderThrottle.onMove = { value ->
+            throttleVal = value
+            sendDriveCmd()
         }
+    }
+
+    // ── Отправка команды движения ──────────────────────────────────────
+    private fun sendDriveCmd() {
+        val s = vm.sensitivity.value
+        // throttleVal: +1 = вперёд, -1 = назад
+        val fwd = (throttleVal * 100 * s.driveSpeedSens).toInt().coerceIn(-100, 100)
+        // steerVal: +1 = вправо, -1 = влево
+        val str = (steerVal * 100 * s.driveSteerSens).toInt().coerceIn(-100, 100)
+        vm.setDriveCmd(fwd, str, fwd)
     }
 
     private fun setupLaser() {
@@ -141,9 +156,6 @@ class ControlFragment : Fragment() {
         if (gyroCtrl == null) gyroCtrl = GyroTiltController(requireContext())
         gyroCtrl!!.zero()
         gyroCtrl!!.start()
-        joystickCam.alpha = 0.3f
-        joystickCam.isEnabled = false
-        tvCamLabel.text = "GYRO"
         tvGyroDebug.visibility = View.VISIBLE
         gyroTickJob = viewLifecycleOwner.lifecycleScope.launch {
             while (true) {
@@ -165,9 +177,6 @@ class ControlFragment : Fragment() {
         gyroCtrl?.stop()
         vm.setTrackMode(TrackingMode.MANUAL)
         vm.setPanTilt(0, 0)
-        joystickCam.alpha = 1.0f
-        joystickCam.isEnabled = true
-        tvCamLabel.text = "CAMERA"
         tvGyroDebug.visibility = View.GONE
     }
 
@@ -204,18 +213,16 @@ class ControlFragment : Fragment() {
         }
     }
 
-    // FIX: RSSI читается через WifiManager (vm.wifiRssi),
-    // а не из телеметрии (telem.rssi всегда 0 — ESP32 в AP-режиме).
     private fun observeRssi() {
         viewLifecycleOwner.lifecycleScope.launch {
             vm.wifiRssi.collectLatest { rssi ->
                 tvRssi.text = if (rssi != 0) "$rssi dBm" else "--"
                 tvRssi.setTextColor(when {
-                    rssi >= -60 -> 0xFF00E676.toInt()  // отличный
-                    rssi >= -70 -> 0xFFFFAB00.toInt()  // средний
-                    rssi >= -80 -> 0xFFFF8F00.toInt()  // слабый
-                    rssi != 0   -> 0xFFFF5252.toInt()  // плохой
-                    else        -> 0xFF888888.toInt()  // нет данных
+                    rssi >= -60 -> 0xFF00E676.toInt()
+                    rssi >= -70 -> 0xFFFFAB00.toInt()
+                    rssi >= -80 -> 0xFFFF8F00.toInt()
+                    rssi != 0   -> 0xFFFF5252.toInt()
+                    else        -> 0xFF888888.toInt()
                 })
             }
         }
@@ -263,7 +270,7 @@ class ControlFragment : Fragment() {
                     tvDist.text = "-- cm"
                     tvDist.setTextColor(0xFF888888.toInt())
                 }
-                // tvRssi — see observeRssi()
+
             }
         }
 
