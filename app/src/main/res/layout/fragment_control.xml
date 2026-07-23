@@ -63,7 +63,6 @@
                 android:text="--" android:textColor="#00E676" android:textSize="12sp"
                 android:textStyle="bold" android:paddingStart="2dp" android:paddingEnd="10dp" />
 
-            <!-- SPD: показывает м/с (из RPM) или % (PWM fallback) -->
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="SPD:" android:textColor="#888" android:textSize="12sp" />
             <TextView android:id="@+id/tv_spd"
@@ -96,7 +95,6 @@
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="RPM:" android:textColor="#888" android:textSize="11sp" />
 
-            <!-- L: левое колесо -->
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="L:" android:textColor="#888" android:textSize="11sp"
                 android:paddingStart="4dp" />
@@ -106,7 +104,6 @@
                 android:textStyle="bold" android:minWidth="36dp"
                 android:paddingStart="2dp" />
 
-            <!-- R: правое колесо -->
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="R:" android:textColor="#888" android:textSize="11sp"
                 android:paddingStart="4dp" />
@@ -116,7 +113,6 @@
                 android:textStyle="bold" android:minWidth="36dp"
                 android:paddingStart="2dp" />
 
-            <!-- Индикатор источника: ⊙ RPM или ~ PWM -->
             <TextView android:id="@+id/tv_spd_source"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="~ PWM"
@@ -131,30 +127,49 @@
             android:textColor="#80CBC4" android:textSize="11sp" />
     </LinearLayout>
 
-    <!-- Слой 4: Нижняя панель (джойстики + кнопки между ними) -->
+    <!-- Слой 4: Нижняя панель управления — слайдеры + кнопки -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
         android:orientation="horizontal"
-        android:gravity="center_vertical|bottom"
-        android:padding="4dp">
+        android:gravity="bottom"
+        android:paddingHorizontal="8dp"
+        android:paddingBottom="12dp">
 
-        <!-- Левый джойстик -->
-        <org.rhanet.roverctrl.ui.control.JoystickView
-            android:id="@+id/joystick_drive"
-            android:layout_width="140dp"
-            android:layout_height="140dp"
-            android:alpha="0.6" />
-
-        <!-- Центральный блок: кнопки -->
+        <!-- ЛЕВЫЙ блок: горизонтальный слайдер поворота -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
+            android:layout_weight="3"
             android:orientation="vertical"
             android:gravity="center"
-            android:paddingHorizontal="4dp">
+            android:layout_marginEnd="6dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="◄ STEER ►"
+                android:textColor="#55FFFFFF"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:paddingBottom="4dp" />
+
+            <org.rhanet.roverctrl.ui.control.SliderView
+                android:id="@+id/slider_steer"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:alpha="0.85" />
+        </LinearLayout>
+
+        <!-- ЦЕНТРАЛЬНЫЙ блок: кнопки -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="2"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:paddingHorizontal="2dp">
 
             <!-- Верхний ряд кнопок -->
             <LinearLayout
@@ -164,14 +179,14 @@
                 android:gravity="center"
                 android:layout_marginBottom="3dp">
                 <ToggleButton android:id="@+id/btn_laser"
-                    android:layout_width="60dp" android:layout_height="28dp"
+                    android:layout_width="56dp" android:layout_height="26dp"
                     android:textOn="LASER" android:textOff="LASER"
-                    android:textColor="#FFF" android:textSize="8sp"
+                    android:textColor="#FFF" android:textSize="7sp"
                     android:background="#FF5252" android:layout_marginEnd="3dp" />
                 <ToggleButton android:id="@+id/btn_gyro_tilt"
-                    android:layout_width="60dp" android:layout_height="28dp"
+                    android:layout_width="56dp" android:layout_height="26dp"
                     android:textOn="GYRO" android:textOff="GYRO"
-                    android:textColor="#FFF" android:textSize="8sp"
+                    android:textColor="#FFF" android:textSize="7sp"
                     android:background="#7C4DFF" />
             </LinearLayout>
 
@@ -183,14 +198,14 @@
                 android:gravity="center"
                 android:layout_marginBottom="3dp">
                 <ToggleButton android:id="@+id/btn_pip"
-                    android:layout_width="52dp" android:layout_height="28dp"
+                    android:layout_width="48dp" android:layout_height="26dp"
                     android:textOn="PiP" android:textOff="PiP"
-                    android:textColor="#FFF" android:textSize="8sp"
+                    android:textColor="#FFF" android:textSize="7sp"
                     android:background="#FF8F00" android:layout_marginEnd="3dp" />
                 <ToggleButton android:id="@+id/btn_gear"
-                    android:layout_width="60dp" android:layout_height="28dp"
+                    android:layout_width="56dp" android:layout_height="26dp"
                     android:textOn="GEAR1" android:textOff="GEAR2"
-                    android:textColor="#FFF" android:textSize="8sp"
+                    android:textColor="#FFF" android:textSize="7sp"
                     android:background="#1565C0" />
             </LinearLayout>
 
@@ -200,28 +215,32 @@
                 android:text="" android:textColor="#B388FF" android:textSize="9sp"
                 android:visibility="gone" />
 
-            <!-- Метки джойстиков -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-                <TextView
-                    android:layout_width="0dp" android:layout_height="wrap_content"
-                    android:layout_weight="1" android:gravity="center"
-                    android:text="DRIVE" android:textColor="#55FFFFFF" android:textSize="10sp" />
-                <TextView android:id="@+id/tv_cam_label"
-                    android:layout_width="0dp" android:layout_height="wrap_content"
-                    android:layout_weight="1" android:gravity="center"
-                    android:text="CAMERA" android:textColor="#55FFFFFF" android:textSize="10sp" />
-            </LinearLayout>
         </LinearLayout>
 
-        <!-- Правый джойстик -->
-        <org.rhanet.roverctrl.ui.control.JoystickView
-            android:id="@+id/joystick_cam"
-            android:layout_width="140dp"
-            android:layout_height="140dp"
-            android:alpha="0.6" />
+        <!-- ПРАВЫЙ блок: вертикальный слайдер газа -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="3"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:layout_marginStart="6dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="▲ THR ▼"
+                android:textColor="#55FFFFFF"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:paddingBottom="4dp" />
+
+            <org.rhanet.roverctrl.ui.control.SliderView
+                android:id="@+id/slider_throttle"
+                android:layout_width="56dp"
+                android:layout_height="180dp"
+                android:alpha="0.85" />
+        </LinearLayout>
 
     </LinearLayout>
 
