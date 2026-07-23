@@ -16,7 +16,8 @@ data class TelemetryData(
     val roll: Float = 0f,
     val rssi: Int = 0,
     val rpmL: Float = Float.NaN,
-    val rpmR: Float = Float.NaN
+    val rpmR: Float = Float.NaN,
+    val dist: Int = 0           // v1.3: HC-SR04 расстояние в см (0 = нет данных)
 ) {
     companion object {
         private const val WHEEL_DIAMETER_M = 0.065f

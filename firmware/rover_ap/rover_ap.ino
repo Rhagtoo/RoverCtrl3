@@ -1,237 +1,373 @@
-/**
- * rover_ap.ino v2.5
- * + OTA прошивка: ArduinoOTA (Arduino IDE) + HTTP POST /update (Android app)
- * fix: rpmL инвертирован (левый энкодер физически подключён в обратной полярности)
- */
+// ============================================================
+//  A4A_SPI.ino — ESP32-S3: WiFi AP + UDP приём + SPI master → Nano
+//
+//  v1.3: Добавлена поддержка HC-SR04: distance_cm из SPI-ответа → телеметрия.
+//  v1.1: Одна SPI-транзакция на обмен (вместо двух). Ответ Nano
+//        всегда на 1 фрейм позади (телеметрия от предыдущей команды) —
+//        на 1 МГц это 128 мкс задержки, незаметно.
+//
+//  Подключение ESP32 → Nano:
+//   GPIO15 (MOSI)  → D11 / ICSP-4
+//   GPIO16 (MISO)  → D12 / ICSP-1
+//   GPIO17 (SCK)   → D13 / ICSP-3
+//   GPIO18 (SS)    → D10
+//   GND            → ICSP-6
+// ============================================================
+
 #include <WiFi.h>
 #include <WiFiUdp.h>
-#include <WebServer.h>
-#include <Update.h>
-#include <ArduinoOTA.h>
-#include <ESP32Servo.h>
-#include "driver/pcnt.h"
+#include <Arduino.h>
+#include <ESP32Encoder.h>
+#include <SPI.h>
 
-const char* AP_SSID = "RoverAP";
-const char* AP_PASS = "rover12345";
-const IPAddress AP_IP(192, 168, 4, 1);
-const IPAddress AP_GATEWAY(192, 168, 4, 1);
-const IPAddress AP_SUBNET(255, 255, 255, 0);
+// ================== DEBUG SWITCHES ==================
+static bool DBG_RX_SERIAL  = true;
+static bool DBG_RPM_SERIAL = false;
+static bool DBG_ACK_SERIAL = false;
+static bool DBG_SPI        = true;
 
-#define MOTOR_IN1 6
-#define MOTOR_IN2 7
-#define PWM_LEFT  4
-#define PWM_RIGHT 5
-#define ENC_L_A 12
-#define ENC_L_B 11
-#define ENC_R_A 15
-#define ENC_R_B 16
-#define SERVO_STEER 13
-#define LASER_PIN   17
-#define CMD_PORT           4210
-#define TELEM_PORT         4211
-#define MOTOR_WATCHDOG_MS  500
-#define TELEM_INTERVAL_MS  500
-#define ENCODER_PPR        220
-#define RPM_SAMPLE_MS      200
-#define MOTOR_RAMP_STEP    4    // % за шаг
-#define MOTOR_RAMP_MS      20   // интервал шага, мс
+// ====== SPI ======
+#define SPI_SS   18
+#define SPI_MOSI 15
+#define SPI_MISO 16
+#define SPI_SCK  17
+#define SPI_SPEED 1000000   // 1 МГц
+
+// ====== Encoders ======
+#define CLK_LEFT  35
+#define DT_LEFT   36
+#define CLK_RIGHT 37
+#define DT_RIGHT  38
+
+ESP32Encoder encoderLeft;
+ESP32Encoder encoderRight;
+
+const int PULSES_PER_REV = 220;
+const unsigned long MEAS_PERIOD_MS = 200;
+
+long lastCountLeft  = 0;
+long lastCountRight = 0;
+unsigned long lastTime = 0;
+float rpmL = 0.0f, rpmR = 0.0f;
+
+// ====== WiFi / UDP ======
+const char* ssid     = "RoverAP";
+const char* password = "Der1parol";
 
 WiFiUDP udp;
-WiFiUDP udpTelem;
-WebServer httpServer(80);
-Servo steerServo;
-volatile int16_t encCountL = 0, encCountR = 0;
-float rpmL = 0.0f, rpmR = 0.0f;
-int lastFwd = 0, lastStr = 0;
-int targetFwd = 0, currentFwd = 0;
-bool laserOn = false;
-IPAddress remoteIP;
-uint16_t remotePort = 0;
-bool haveRemote = false;
-unsigned long lastCmdTime = 0, lastTelemTime = 0, lastRpmSampleTime = 0;
-int16_t prevEncL = 0, prevEncR = 0;
+unsigned int localUdpPort = 4210;
+#define TELEM_PORT   4211
+char incomingPacket[255];
 
-void setupEncoder(pcnt_unit_t unit, int pinA, int pinB) {
-    pcnt_config_t cfg = {};
-    cfg.pulse_gpio_num = pinA; cfg.ctrl_gpio_num = pinB;
-    cfg.channel = PCNT_CHANNEL_0; cfg.unit = unit;
-    cfg.pos_mode = PCNT_COUNT_INC; cfg.neg_mode = PCNT_COUNT_DEC;
-    cfg.lctrl_mode = PCNT_MODE_REVERSE; cfg.hctrl_mode = PCNT_MODE_KEEP;
-    cfg.counter_h_lim = 32767; cfg.counter_l_lim = -32768;
-    pcnt_unit_config(&cfg);
-    pcnt_set_filter_value(unit, 100); pcnt_filter_enable(unit);
-    pcnt_counter_pause(unit); pcnt_counter_clear(unit); pcnt_counter_resume(unit);
-}
+IPAddress lastSenderIP;
+uint16_t  lastSenderPort = 0;
+bool      haveSender = false;
 
-void readEncoders() {
-    int16_t cL, cR;
-    pcnt_get_counter_value(PCNT_UNIT_0, &cL);
-    pcnt_get_counter_value(PCNT_UNIT_1, &cR);
-    encCountL = cL; encCountR = cR;
-}
+const int SERVO_LEFT  = 128;
+const int SERVO_RIGHT = 62;
 
-void updateRpm() {
-    unsigned long now = millis();
-    unsigned long dt = now - lastRpmSampleTime;
-    if (dt >= RPM_SAMPLE_MS) {
-        readEncoders();
-        float factor = 60000.0f / (ENCODER_PPR * dt);
+// ====== Heartbeat ======
+// Heartbeat теперь НЕ зависит от непрерывности UDP.
+// Как только получена первая команда — heartbeat шлёт последнюю команду
+// каждые HEARTBEAT_MS, пока ESP жив. Если ESP умирает/выключается —
+// watchdog на Nano (500 мс) сам заглушит моторы.
+// Это надёжнее, чем таймаут UDP — Wi-Fi может икать, телефон может
+// на секунду замолчать, а ровер должен ехать плавно.
+#define HEARTBEAT_MS 100
 
-        // FIX v2.4: левый энкодер физически подключён в обратной полярности —
-        // при движении вперёд счётчик идёт вниз. Инвертируем знак rpmL
-        // чтобы оба колеса давали положительный RPM при движении вперёд.
-        rpmL = -(encCountL - prevEncL) * factor;   // ← минус
-        rpmR =  (encCountR - prevEncR) * factor;
+int lastSpd = 0, lastStr = 0, lastFwd = 0, lastLaser = 0;
+unsigned long lastUdpRxTime     = 0;
+unsigned long lastHeartbeatSent = 0;
 
-        prevEncL = encCountL; prevEncR = encCountR;
-        lastRpmSampleTime = now;
+// ================== Протокол SPI ==================
+
+struct CmdFrame {
+  uint8_t marker;      // 0xA5
+  uint8_t pwm_left;
+  uint8_t pwm_right;
+  uint8_t servo_angle;
+  uint8_t flags;       // bit0=laser, bit1=dir_L, bit2=dir_R, bit3=enable
+  uint8_t rsvd1;
+  uint8_t rsvd2;
+  uint8_t crc;         // XOR bytes 0-6
+};
+
+struct RspFrame {
+  uint8_t marker;      // 0xB5
+  uint8_t pwm_l_echo;
+  uint8_t pwm_r_echo;
+  uint8_t servo_actual;
+  uint8_t status;      // bit0=laser, bit1=wd_ok, bit2=fault
+  uint8_t bat_raw;
+  uint8_t rsvd;
+  uint8_t crc;
+};
+
+// CRC-8 (полином 0x07) — должен совпадать с Nano
+uint8_t crc8(const uint8_t* data, int len) {
+  uint8_t crc = 0;
+  while (len--) {
+    crc ^= *data++;
+    for (uint8_t i = 0; i < 8; i++) {
+      crc = (crc & 0x80) ? (crc << 1) ^ 0x07 : (crc << 1);
     }
+  }
+  return crc;
 }
 
-void applyMotorPwm(int fwd) {
-    int pwm = constrain(abs(fwd) * 255 / 100, 0, 255);
-    if (fwd > 0) { digitalWrite(MOTOR_IN1, HIGH); digitalWrite(MOTOR_IN2, LOW); }
-    else if (fwd < 0) { digitalWrite(MOTOR_IN1, LOW); digitalWrite(MOTOR_IN2, HIGH); }
-    else { digitalWrite(MOTOR_IN1, LOW); digitalWrite(MOTOR_IN2, LOW); }
-    analogWrite(PWM_LEFT, pwm); analogWrite(PWM_RIGHT, pwm);
-}
+struct NanoTelem {
+  uint8_t pwm_l_echo, pwm_r_echo;
+  uint8_t servo_actual;
+  uint8_t status;
+  uint8_t bat_raw;
+  uint8_t distance_cm;   // v1.3: HC-SR04
+  bool valid;
+} nanoTelem = {0};
 
-void updateMotorRamp() {
-    static unsigned long lastRampTime = 0;
-    unsigned long now = millis();
-    if ((now - lastRampTime) < MOTOR_RAMP_MS) return;
-    lastRampTime = now;
+// Одна транзакция: отправляем команду, одновременно читаем ответ Nano.
+// Ответ содержит телеметрию от ПРЕДЫДУЩЕЙ команды (Nano заполняет spi_rsp
+// после обработки очередного фрейма). Задержка в 1 фрейм (128 мкс) — незаметна.
+bool spiExchange(int pwm_l, int pwm_r, int servo, bool laser, bool dir_l, bool dir_r, bool enable) {
+  CmdFrame cmd;
+  cmd.marker      = 0xA5;
+  cmd.pwm_left    = (uint8_t)constrain(abs(pwm_l), 0, 255);
+  cmd.pwm_right   = (uint8_t)constrain(abs(pwm_r), 0, 255);
+  cmd.servo_angle = (uint8_t)constrain(servo, 0, 180);
+  cmd.flags       = (laser   ? 0x01 : 0x00)
+                  | (dir_l   ? 0x02 : 0x00)
+                  | (dir_r   ? 0x04 : 0x00)
+                  | (enable  ? 0x08 : 0x00);
+  cmd.rsvd1 = 0;
+  cmd.rsvd2 = 0;
+  cmd.crc   = crc8((uint8_t*)&cmd, 7);
 
-    if (currentFwd < targetFwd) currentFwd = min(currentFwd + MOTOR_RAMP_STEP, targetFwd);
-    else if (currentFwd > targetFwd) currentFwd = max(currentFwd - MOTOR_RAMP_STEP, targetFwd);
+  RspFrame rsp;
+  uint8_t *cmdPtr = (uint8_t*)&cmd;
+  uint8_t *rspPtr = (uint8_t*)&rsp;
 
-    applyMotorPwm(currentFwd);
-    lastFwd = currentFwd;
-}
+  SPI.beginTransaction(SPISettings(SPI_SPEED, MSBFIRST, SPI_MODE0));
+  digitalWrite(SPI_SS, LOW);
 
-void stopMotors() {
-    digitalWrite(MOTOR_IN1, LOW); digitalWrite(MOTOR_IN2, LOW);
-    analogWrite(PWM_LEFT, 0); analogWrite(PWM_RIGHT, 0); lastFwd = 0; currentFwd = 0; targetFwd = 0;
-}
+  for (int i = 0; i < 8; i++) {
+    rspPtr[i] = SPI.transfer(cmdPtr[i]);
+  }
 
-void parseCommand(const char* cmd) {
-    int spd = 0, str = 0, fwd = 0, laser = 0, gear = 2;
-    char* ptr = (char*)cmd;
-    if (strstr(ptr, "SPD:")) spd = atoi(strstr(ptr, "SPD:") + 4);
-    if (strstr(ptr, "STR:")) str = atoi(strstr(ptr, "STR:") + 4);
-    if (strstr(ptr, "FWD:")) fwd = atoi(strstr(ptr, "FWD:") + 4);
-    if (strstr(ptr, "LASER:")) laser = atoi(strstr(ptr, "LASER:") + 6);
-    if (strstr(ptr, "GEAR:")) gear = constrain(atoi(strstr(ptr, "GEAR:") + 5), 1, 2);
+  digitalWrite(SPI_SS, HIGH);
+  SPI.endTransaction();
 
-    str = constrain(str, -100, 100);
-    steerServo.write(map(str, -100, 100, 40, 140));
-    lastStr = str;
-
-    int maxFwd = (gear == 1) ? 50 : 100;
-    fwd = constrain(fwd, -maxFwd, maxFwd);
-    targetFwd = fwd;
-
-    laserOn = (laser == 1);
-    digitalWrite(LASER_PIN, laserOn ? HIGH : LOW);
-    lastCmdTime = millis();
-}
-
-void checkWatchdog() {
-    if (lastCmdTime > 0 && (millis() - lastCmdTime) > MOTOR_WATCHDOG_MS) {
-        if (lastFwd != 0) { stopMotors(); laserOn = false; digitalWrite(LASER_PIN, LOW); }
+  // Валидация ответа (v1.2: диагностика ошибок)
+  static int spiErrCount = 0;
+  if (rsp.marker != 0xB5) {
+    spiErrCount++;
+    if (spiErrCount <= 3 || spiErrCount % 50 == 0) {
+      Serial.printf("[SPI ERR] bad marker: 0x%02X errs=%d\n", rsp.marker, spiErrCount);
     }
+    return false;
+  }
+  uint8_t calcCrc = crc8(rspPtr, 7);
+  if (rsp.crc != calcCrc) {
+    spiErrCount++;
+    if (spiErrCount <= 3 || spiErrCount % 50 == 0) {
+      Serial.printf("[SPI ERR] bad CRC: got=0x%02X calc=0x%02X errs=%d\n", rsp.crc, calcCrc, spiErrCount);
+    }
+    return false;
+  }
+  spiErrCount = 0;
+
+  nanoTelem.pwm_l_echo   = rsp.pwm_l_echo;
+  nanoTelem.pwm_r_echo   = rsp.pwm_r_echo;
+  nanoTelem.servo_actual = rsp.servo_actual;
+  nanoTelem.status       = rsp.status;
+  nanoTelem.bat_raw      = rsp.bat_raw;
+  nanoTelem.distance_cm   = rsp.distance_cm;   // v1.3
+  nanoTelem.valid        = true;
+
+  if (DBG_SPI) {
+    Serial.printf("[SPI] CMD: pwm=%d,%d sv=%d fl=0x%02X | "
+                  "RSP: mk=0x%02X echo=%d,%d sv=%d st=0x%02X bat=%d dist=%d\n",
+                  pwm_l, pwm_r, servo, cmd.flags,
+                  rsp.marker, rsp.pwm_l_echo, rsp.pwm_r_echo,
+                  rsp.servo_actual, rsp.status, rsp.bat_raw, rsp.distance_cm);
+  }
+
+  return true;
 }
 
-void sendTelemetry() {
-    if (!haveRemote) return;
-    if (millis() - lastTelemTime < TELEM_INTERVAL_MS) return;
-    lastTelemTime = millis();
-    char buf[256];
-    // rssi убран из телеметрии: в AP-режиме WiFi.RSSI() всегда возвращает 0
-    // (нет базовой станции). Телефон читает своё RSSI через WifiManager.
-    snprintf(buf, sizeof(buf),
-        "{\"bat\":100,\"yaw\":0.0,\"spd\":%d,\"str\":%d,"
-        "\"pit\":0.0,\"rol\":0.0,\"rssi\":0,\"rpmL\":%.1f,\"rpmR\":%.1f}",
-        abs(lastFwd), lastStr, rpmL, rpmR);
-    udpTelem.beginPacket(remoteIP, TELEM_PORT);
-    udpTelem.write((const uint8_t*)buf, strlen(buf));
-    udpTelem.endPacket();
+// ================== Вспомогательные функции ==================
+
+void sendUdpReply(const char* payload) {
+  if (!haveSender || lastSenderPort == 0) return;
+  udp.beginPacket(lastSenderIP, lastSenderPort);
+  udp.write((const uint8_t*)payload, strlen(payload));
+  udp.endPacket();
+  if (DBG_ACK_SERIAL) {
+    Serial.printf("[TX->%s:%u] %s\n", lastSenderIP.toString().c_str(), lastSenderPort, payload);
+  }
 }
+
+// ================== SETUP ==================
 
 void setup() {
-    Serial.begin(115200); Serial.println("\n=== Rover AP v2.4 ===");
-    pinMode(MOTOR_IN1, OUTPUT); pinMode(MOTOR_IN2, OUTPUT);
-    pinMode(PWM_LEFT, OUTPUT); pinMode(PWM_RIGHT, OUTPUT);
-    pinMode(LASER_PIN, OUTPUT); stopMotors(); digitalWrite(LASER_PIN, LOW);
-    ESP32PWM::allocateTimer(0);
-    steerServo.setPeriodHertz(50); steerServo.attach(SERVO_STEER, 500, 2400); steerServo.write(90);
-    setupEncoder(PCNT_UNIT_0, ENC_L_A, ENC_L_B);
-    setupEncoder(PCNT_UNIT_1, ENC_R_A, ENC_R_B);
-    WiFi.mode(WIFI_AP); WiFi.softAPConfig(AP_IP, AP_GATEWAY, AP_SUBNET);
-    WiFi.softAP(AP_SSID, AP_PASS);
-    Serial.printf("AP:%s IP:%s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
-    udp.begin(CMD_PORT); udpTelem.begin(TELEM_PORT);
+  Serial.begin(115200);
+  delay(300);
 
-    // ── ArduinoOTA (прошивка через Arduino IDE) ───────────────────────────
-    ArduinoOTA.setHostname("rover-ap");
-    ArduinoOTA.onStart([]() { Serial.println("OTA Start"); stopMotors(); });
-    ArduinoOTA.onEnd([]()   { Serial.println("\nOTA End"); });
-    ArduinoOTA.onProgress([](unsigned int done, unsigned int total) {
-        Serial.printf("OTA %u%%\r", done * 100 / total);
-    });
-    ArduinoOTA.onError([](ota_error_t e) {
-        Serial.printf("OTA Error[%u]\n", e);
-    });
-    ArduinoOTA.begin();
+  // SPI master
+  pinMode(SPI_SS, OUTPUT);
+  digitalWrite(SPI_SS, HIGH);
+  SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI, SPI_SS);
+  Serial.printf("SPI master: SCK=%d MISO=%d MOSI=%d SS=%d @ %d Hz\n",
+                SPI_SCK, SPI_MISO, SPI_MOSI, SPI_SS, SPI_SPEED);
 
-    // ── HTTP OTA /update (прошивка через Android-приложение) ─────────────
-    httpServer.on("/update", HTTP_POST,
-        []() {  // onComplete
-            httpServer.send(200, "text/plain", Update.hasError() ? "FAIL" : "OK");
-            if (!Update.hasError()) { delay(500); ESP.restart(); }
-        },
-        []() {  // onUpload (multipart handler)
-            HTTPUpload& upload = httpServer.upload();
-            if (upload.status == UPLOAD_FILE_START) {
-                Serial.printf("HTTP OTA: %s\n", upload.filename.c_str());
-                stopMotors();
-                if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
-                    Update.printError(Serial);
-                }
-            } else if (upload.status == UPLOAD_FILE_WRITE) {
-                if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-                    Update.printError(Serial);
-                }
-            } else if (upload.status == UPLOAD_FILE_END) {
-                if (Update.end(true)) {
-                    Serial.printf("HTTP OTA OK: %u bytes\n", upload.totalSize);
-                } else {
-                    Update.printError(Serial);
-                }
-            }
-        }
-    );
-    httpServer.begin();
-    Serial.println("Ready!");
+  // Encoders
+  encoderLeft.attachHalfQuad(DT_LEFT, CLK_LEFT);
+  encoderLeft.setCount(0);
+  encoderRight.attachHalfQuad(DT_RIGHT, CLK_RIGHT);
+  encoderRight.setCount(0);
+  lastTime = millis();
+
+  // WiFi AP
+  Serial.print("Starting AP 'RoverAP'...");
+  if (WiFi.softAP(ssid, password)) {
+    Serial.println(" OK");
+    Serial.print("SSID: "); Serial.println(ssid);
+    Serial.print("IP: "); Serial.println(WiFi.softAPIP());
+  } else {
+    Serial.println(" FAILED!");
+  }
+
+  udp.begin(localUdpPort);
+  Serial.printf("Listening UDP on %s:%u\n", WiFi.softAPIP().toString().c_str(), localUdpPort);
+
+  // Первый обмен: инициализируем Nano, телеметрия будет с нулями (нормально)
+  spiExchange(0, 0, 90, false, true, true, true);
 }
+
+// ================== LOOP ==================
 
 void loop() {
-    int s = udp.parsePacket();
-    if (s > 0) {
-        char buf[256]; int len = udp.read(buf, sizeof(buf) - 1); buf[len] = '\0';
-        remoteIP = udp.remoteIP(); remotePort = udp.remotePort(); haveRemote = true;
-        parseCommand(buf);
-    }
-    ArduinoOTA.handle();
-    httpServer.handleClient();
-    updateMotorRamp();
-    updateRpm(); checkWatchdog(); sendTelemetry(); delay(5);
-}
 
-void serialEvent() {
-    while (Serial.available()) {
-        String cmd = Serial.readStringUntil('\n'); cmd.trim();
-        if (cmd == "status") Serial.printf("RPM L=%.1f R=%.1f FWD=%d STR=%d\n", rpmL, rpmR, lastFwd, lastStr);
-        else if (cmd == "stop") { stopMotors(); Serial.println("Stopped"); }
+  // ── UDP приём ──
+  int packetSize = udp.parsePacket();
+  if (packetSize) {
+    lastSenderIP   = udp.remoteIP();
+    lastSenderPort = udp.remotePort();
+    haveSender     = true;
+
+    int len = udp.read(incomingPacket, sizeof(incomingPacket) - 1);
+    if (len > 0) incomingPacket[len] = 0;
+
+    int spd = 0, str = 0, fwd = 0, laser = 0, gear = 0;
+
+    // v1.2: RAW пакет ДО парсинга — видим что реально шлёт телефон
+    Serial.printf("[PKT RAW] '%s' (%d bytes)\n", incomingPacket, len);
+
+    sscanf(incomingPacket, "SPD:%d;STR:%d;FWD:%d;LASER:%d;GEAR:%d", &spd, &str, &fwd, &laser, &gear);
+
+    str   = constrain(str, -100, 100);
+    laser = (laser != 0) ? 1 : 0;
+
+    if (DBG_RX_SERIAL) {
+      Serial.printf("[RX %s:%u] %s\n  parsed: SPD=%d STR=%d FWD=%d LASER=%d GEAR=%d\n",
+                     lastSenderIP.toString().c_str(), lastSenderPort, incomingPacket, spd, str, fwd, laser, gear);
     }
+
+    bool dir_forward = (spd >= 0);
+    int pwm_val = map(constrain(abs(spd), 0, 100), 0, 100, 0, 255);
+    int servoAngle = map(str, -100, 100, SERVO_RIGHT, SERVO_LEFT);
+
+    spiExchange(pwm_val, pwm_val, servoAngle, laser, dir_forward, dir_forward, true);
+
+    lastSpd = spd; lastStr = str; lastFwd = fwd; lastLaser = laser;
+    lastUdpRxTime = millis();
+    lastHeartbeatSent = lastUdpRxTime;
+
+    // ACK + телеметрия
+    int bat_pct = (nanoTelem.bat_raw > 0) ? map(nanoTelem.bat_raw, 0, 128, 0, 100) : 100;
+    char ackBuf[200];
+    snprintf(ackBuf, sizeof(ackBuf),
+      "{\"ack\":1,\"cmd\":1,\"spd\":%d,\"str\":%d,\"fwd\":%d,"
+      "\"bat\":%d,\"rpmL\":%.1f,\"rpmR\":%.1f,"
+      "\"sv\":%d,\"st\":%d}",
+      abs(spd), str, fwd,
+      bat_pct, rpmL, rpmR,
+      nanoTelem.servo_actual, nanoTelem.status);
+    sendUdpReply(ackBuf);
+  }
+
+  // ── Замер RPM ──
+  unsigned long now1 = millis();
+  if (now1 - lastTime >= MEAS_PERIOD_MS) {
+    long deltaL = encoderLeft.getCount() - lastCountLeft;
+    long deltaR = encoderRight.getCount() - lastCountRight;
+    lastCountLeft = encoderLeft.getCount();
+    lastCountRight = encoderRight.getCount();
+
+    float dt = (now1 - lastTime) / 1000.0f;
+    if (dt <= 0) dt = MEAS_PERIOD_MS / 1000.0f;
+    lastTime = now1;
+
+    float rpsL = (float)deltaL / PULSES_PER_REV / dt;
+    float rpsR = (float)deltaR / PULSES_PER_REV / dt;
+    rpmL = rpsL * 60.0f;
+    rpmR = rpsR * 60.0f;
+
+    if (DBG_RPM_SERIAL) Serial.printf("RPM: Left=%.2f  Right=%.2f\n", rpmL, rpmR);
+  }
+
+  // ── Heartbeat ──
+  static unsigned long hbCount = 0;
+  unsigned long nowHb = millis();
+  if (lastUdpRxTime > 0 && nowHb - lastHeartbeatSent >= HEARTBEAT_MS) {
+    int pwm_val = map(constrain(abs(lastSpd), 0, 100), 0, 100, 0, 255);
+    bool dir_fwd = (lastSpd >= 0);
+    int servoAngle = map(lastStr, -100, 100, SERVO_RIGHT, SERVO_LEFT);
+
+    bool ok = spiExchange(pwm_val, pwm_val, servoAngle, lastLaser, dir_fwd, dir_fwd, true);
+    lastHeartbeatSent = nowHb;
+    hbCount++;
+
+    // v1.2: каждые 10 heartbeat'ов — диагностика
+    if (hbCount % 10 == 0) {
+      Serial.printf("[HB #%lu] spd=%d pwm=%d dir=%s sv=%d spi_ok=%d nano_st=0x%02X\n",
+                    hbCount, lastSpd, pwm_val, dir_fwd ? "FWD" : "REV",
+                    servoAngle, ok, nanoTelem.status);
+    }
+  }
+
+  // v1.2: безусловная диагностика каждые 2 сек — следим за переменными heartbeat
+  static unsigned long lastHBDiag = 0;
+  if (millis() - lastHBDiag >= 2000) {
+    lastHBDiag = millis();
+    Serial.printf("[HB DIAG] udpRx=%lu now=%lu hbSent=%lu hbCnt=%lu lastSpd=%d\n",
+                  lastUdpRxTime, nowHb, lastHeartbeatSent, hbCount, lastSpd);
+  }
+
+  // ── Телеметрия на порт 4211 (каждые 200 мс) ──
+  static unsigned long lastTelem = 0;
+  if (haveSender && millis() - lastTelem >= 200) {
+    lastTelem = millis();
+    char telBuf[200];
+    int bat_pct = (nanoTelem.bat_raw > 0) ? map(nanoTelem.bat_raw, 0, 128, 0, 100) : 100;
+
+    // rpmL/rpmR + distance (v1.3: HC-SR04)
+    if (abs(rpmL) > 0.01f || abs(rpmR) > 0.01f) {
+      snprintf(telBuf, sizeof(telBuf),
+        "{\"bat\":%d,\"yaw\":0.0,\"spd\":%d,\"str\":%d,"
+        "\"pit\":0.0,\"rol\":0.0,\"rssi\":%d,"
+        "\"rpmL\":%.1f,\"rpmR\":%.1f,\"dist\":%d}",
+        bat_pct, abs(lastSpd), lastStr, WiFi.RSSI(), rpmL, rpmR,
+        nanoTelem.distance_cm);
+    } else {
+      snprintf(telBuf, sizeof(telBuf),
+        "{\"bat\":%d,\"yaw\":0.0,\"spd\":%d,\"str\":%d,"
+        "\"pit\":0.0,\"rol\":0.0,\"rssi\":%d,"
+        "\"dist\":%d}",
+        bat_pct, abs(lastSpd), lastStr, WiFi.RSSI(),
+        nanoTelem.distance_cm);
+    }
+
+    udp.beginPacket(lastSenderIP, TELEM_PORT);
+    udp.write((uint8_t*)telBuf, strlen(telBuf));
+    udp.endPacket();
+  }
 }

@@ -44,6 +44,7 @@ class ControlFragment : Fragment() {
     private lateinit var tvYaw:         TextView
     private lateinit var tvRssi:        TextView
     private lateinit var tvOdom:        TextView
+    private lateinit var tvDist:        TextView    // v1.3: HC-SR04
     private lateinit var tvGyroDebug:   TextView
     private lateinit var tvCamLabel:    TextView
 
@@ -75,6 +76,7 @@ class ControlFragment : Fragment() {
         tvYaw         = view.findViewById(R.id.tv_yaw)
         tvRssi        = view.findViewById(R.id.tv_rssi)
         tvOdom        = view.findViewById(R.id.tv_odom)
+        tvDist        = view.findViewById(R.id.tv_dist)   // v1.3: HC-SR04
         tvGyroDebug   = view.findViewById(R.id.tv_gyro_debug)
         tvCamLabel    = view.findViewById(R.id.tv_cam_label)
         pipContainer  = view.findViewById(R.id.pip_container)
@@ -248,7 +250,20 @@ class ControlFragment : Fragment() {
                 }
 
                 tvYaw.text = String.format("%.0f°", t.yaw)
-                // tvRssi — через observeRssi()
+
+                // v1.3: HC-SR04 distance
+                if (t.dist > 0) {
+                    tvDist.text = String.format("%d cm", t.dist)
+                    tvDist.setTextColor(when {
+                        t.dist >= 100 -> 0xFF00E676.toInt()
+                        t.dist >= 30  -> 0xFFFFAB00.toInt()
+                        else          -> 0xFFFF5252.toInt()
+                    })
+                } else {
+                    tvDist.text = "-- cm"
+                    tvDist.setTextColor(0xFF888888.toInt())
+                }
+                // tvRssi — see observeRssi()
             }
         }
 
