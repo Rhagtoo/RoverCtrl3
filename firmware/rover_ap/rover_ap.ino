@@ -221,9 +221,9 @@ void setup() {
                 SPI_SCK, SPI_MISO, SPI_MOSI, SPI_SS, SPI_SPEED);
 
   // Encoders
-  encoderLeft.attachHalfQuad(DT_LEFT, CLK_LEFT);
+  encoderLeft.attachFullQuad(DT_LEFT, CLK_LEFT);
   encoderLeft.setCount(0);
-  encoderRight.attachHalfQuad(DT_RIGHT, CLK_RIGHT);
+  encoderRight.attachFullQuad(DT_RIGHT, CLK_RIGHT);
   encoderRight.setCount(0);
   lastTime = millis();
 
