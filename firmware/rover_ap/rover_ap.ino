@@ -366,6 +366,14 @@ void loop() {
         nanoTelem.distance_cm);
     }
 
+    // v1.3: отладка — видим что реально шлём
+    static unsigned long telemCount = 0;
+    telemCount++;
+    if (telemCount % 10 == 0) {  // каждые 10-й пакет (~2 сек)
+      Serial.printf("[TELEM #%lu] dist=%d bat=%d spd=%d\n",
+                    telemCount, nanoTelem.distance_cm, bat_pct, abs(lastSpd));
+    }
+
     udp.beginPacket(lastSenderIP, TELEM_PORT);
     udp.write((uint8_t*)telBuf, strlen(telBuf));
     udp.endPacket();

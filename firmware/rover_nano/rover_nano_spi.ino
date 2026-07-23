@@ -75,6 +75,12 @@ struct RspFrame {
 volatile uint8_t distanceCm = 0;        // v8.7: последнее измерение (0-255 см)
 unsigned long lastSonarMeasureMs = 0;
 
+// Неблокирующий конечный автомат HC-SR04 (без pulseIn, не тормозит SPI)
+enum SonarState { SONAR_IDLE, SONAR_TRIG, SONAR_WAIT_ECHO };
+SonarState sonarState = SONAR_IDLE;
+unsigned long sonarTrigStart = 0;
+unsigned long sonarEchoStart = 0;
+
 // ── Watchdog ──────────────────────────────────────────────────────────
 #define MOTOR_WATCHDOG_MS  500
 
@@ -348,30 +354,54 @@ void setup() {
   Serial.println("SPI slave ready (Servo.h Timer1, PCINT SS sync)");
 }
 
-// ================== HC-SR04 ==================
+// ================== HC-SR04 (неблокирующий конечный автомат) ==================
 
 void measureDistance() {
-  unsigned long now = millis();
-  if (now - lastSonarMeasureMs < SONAR_INTERVAL_MS) return;
-  lastSonarMeasureMs = now;
+  switch (sonarState) {
+    case SONAR_IDLE: {
+      unsigned long now = millis();
+      if (now - lastSonarMeasureMs < SONAR_INTERVAL_MS) return;
+      lastSonarMeasureMs = now;
+      // Запускаем Trig-импульс (10 мкс HIGH)
+      digitalWrite(TRIG_PIN, HIGH);
+      sonarTrigStart = micros();
+      sonarState = SONAR_TRIG;
+      break;
+    }
 
-  // Генерируем 10 мкс импульс на Trig
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
+    case SONAR_TRIG: {
+      if (micros() - sonarTrigStart >= 10) {
+        digitalWrite(TRIG_PIN, LOW);
+        sonarState = SONAR_WAIT_ECHO;
+        // sonarEchoStart не устанавливаем — ждём пока Echo станет HIGH
+      }
+      break;
+    }
 
-  // Измеряем длительность Echo (таймаут 30 мс = ~5 м)
-  unsigned long duration = pulseIn(ECHO_PIN, HIGH, 30000);
-
-  if (duration > 0) {
-    // Расстояние = duration(мкс) / 58 (см)
-    uint16_t cm = (uint16_t)(duration / 58);
-    // Ограничиваем 0-255 см (влезает в uint8_t SPI-ответа)
-    distanceCm = (cm > 255) ? 255 : (uint8_t)cm;
-  } else {
-    distanceCm = 0;  // нет эха = нет препятствия в пределах 5 м
+    case SONAR_WAIT_ECHO: {
+      int echo = digitalRead(ECHO_PIN);
+      if (echo == HIGH && sonarEchoStart == 0) {
+        sonarEchoStart = micros();  // засекли начало импульса
+      } else if (echo == LOW && sonarEchoStart != 0) {
+        // Конец импульса — вычисляем расстояние
+        unsigned long duration = micros() - sonarEchoStart;
+        sonarEchoStart = 0;
+        if (duration > 0 && duration < 30000) {
+          uint16_t cm = (uint16_t)(duration / 58);
+          distanceCm = (cm > 255) ? 255 : (uint8_t)cm;
+        } else {
+          distanceCm = 0;
+        }
+        sonarState = SONAR_IDLE;
+      } else if (echo == LOW && sonarEchoStart == 0) {
+        // Таймаут: если прошло >30 мс с начала TRIG и эха нет
+        if (micros() - sonarTrigStart > 30000) {
+          distanceCm = 0;  // нет объекта
+          sonarState = SONAR_IDLE;
+        }
+      }
+      break;
+    }
   }
 }
 
