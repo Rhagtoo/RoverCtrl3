@@ -75,6 +75,11 @@ struct RspFrame {
 volatile uint8_t distanceCm = 0;        // v8.7: последнее измерение (0-255 см)
 unsigned long lastSonarMeasureMs = 0;
 
+// Медианный фильтр (3 последних замера) — убирает выбросы HC-SR04
+#define SONAR_MEDIAN_N 5
+uint16_t sonarBuf[SONAR_MEDIAN_N] = {0};
+uint8_t sonarBufIdx = 0;
+
 // Неблокирующий конечный автомат HC-SR04 (без pulseIn, не тормозит SPI)
 enum SonarState { SONAR_IDLE, SONAR_TRIG, SONAR_WAIT_ECHO };
 SonarState sonarState = SONAR_IDLE;
@@ -171,8 +176,8 @@ void applyMotors(int left, int right) {
 
   // При смене направления — сбрасываем PWM в 0 на 1 цикл (анти-спайк)
   if (lastDominant != 0 && dominant != 0 && (lastDominant > 0) != (dominant > 0)) {
-    analogWrite(PWM_RIGHT, 0);
-    delayMicroseconds(3000);  // даём TB6612 переключить транзисторы
+    OCR2B = 0;  // прямая запись в регистр таймера (не analogWrite — ломает 62.5 кГц!)
+    delayMicroseconds(3000);
   }
   lastDominant = dominant;
 
@@ -191,7 +196,7 @@ void applyMotors(int left, int right) {
   if (target > ramped) ramped = min(target, ramped + PWM_RAMP_STEP);
   else                 ramped = max(target, ramped - PWM_RAMP_STEP);
 
-  analogWrite(PWM_RIGHT, ramped);
+  OCR2B = ramped;  // прямая запись в OCR2B (не analogWrite — ломает кастомный 62.5 кГц PWM!)
 
   leftPwm = left; rightPwm = right;
 }
@@ -231,7 +236,7 @@ void onObstacle() {
 
 void stopAll() {
   digitalWrite(MOTOR_IN1, LOW); digitalWrite(MOTOR_IN2, LOW);
-  analogWrite(PWM_RIGHT, 0);
+  OCR2B = 0;  // прямая запись (не analogWrite!)
   leftPwm = 0; rightPwm = 0;
   targetServoAngle = 90;
   writeServoNow(90);
@@ -324,7 +329,7 @@ void setup() {
 
   digitalWrite(ENBL, HIGH);
   digitalWrite(MOTOR_IN1, LOW); digitalWrite(MOTOR_IN2, LOW);
-  analogWrite(PWM_RIGHT, 0);
+  OCR2B = 0;  // прямая запись (не analogWrite — ломает 62.5 кГц!)
   digitalWrite(LASER_PIN, LOW);
 
   steerServo.attach(SERVO_STEER);
@@ -388,7 +393,19 @@ void measureDistance() {
         sonarEchoStart = 0;
         if (duration > 0 && duration < 30000) {
           uint16_t cm = (uint16_t)(duration / 58);
-          distanceCm = (cm > 255) ? 255 : (uint8_t)cm;
+          // Медианный фильтр — убирает случайные выбросы
+          sonarBuf[sonarBufIdx % SONAR_MEDIAN_N] = cm;
+          sonarBufIdx++;
+          if (sonarBufIdx >= SONAR_MEDIAN_N) {
+            // Сортируем копию буфера, берём медиану
+            uint16_t tmp[SONAR_MEDIAN_N];
+            memcpy(tmp, sonarBuf, sizeof(tmp));
+            for (int i = 0; i < SONAR_MEDIAN_N-1; i++)
+              for (int j = i+1; j < SONAR_MEDIAN_N; j++)
+                if (tmp[i] > tmp[j]) { uint16_t t = tmp[i]; tmp[i] = tmp[j]; tmp[j] = t; }
+            uint16_t med = tmp[SONAR_MEDIAN_N/2];
+            distanceCm = (med > 255) ? 255 : (uint8_t)med;
+          }
         } else {
           distanceCm = 0;
         }
