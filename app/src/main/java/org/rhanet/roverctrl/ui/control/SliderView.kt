@@ -28,6 +28,12 @@ class SliderView @JvmOverloads constructor(
     enum class Orientation { HORIZONTAL, VERTICAL }
 
     var orientation = Orientation.HORIZONTAL
+        set(value) {
+            if (field != value) {
+                field = value
+                requestLayout()  // пересчитать trackRect под новую ориентацию
+            }
+        }
     var onMove: ((value: Float) -> Unit)? = null
 
     var value = 0f; private set
