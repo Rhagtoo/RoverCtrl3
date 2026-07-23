@@ -99,7 +99,7 @@ struct RspFrame {
   uint8_t servo_actual;
   uint8_t status;      // bit0=laser, bit1=wd_ok, bit2=fault
   uint8_t bat_raw;
-  uint8_t rsvd;
+  uint8_t distance_cm; // v1.3: HC-SR04 расстояние, 0-255 см (0 = нет данных)
   uint8_t crc;
 };
 
