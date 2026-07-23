@@ -438,6 +438,7 @@ void loop() {
     lastDiag = millis();
     Serial.print("Nano: L="); Serial.print(leftPwm);
     Serial.print(" R="); Serial.print(rightPwm);
+    Serial.print(" PWM="); Serial.print(OCR2B);
     Serial.print(" SV="); Serial.print(servoAngle);
     Serial.print("/"); Serial.print(targetServoAngle);
     Serial.print(" Laser="); Serial.print(laserState ? "ON" : "OFF");
