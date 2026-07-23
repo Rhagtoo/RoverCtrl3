@@ -132,7 +132,8 @@ class TelemetryReceiver {
         roll  = json.optDouble("rol", 0.0).toFloat(),
         rssi  = json.optInt("rssi", 0),
         rpmL  = if (json.has("rpmL")) json.optDouble("rpmL").toFloat() else Float.NaN,
-        rpmR  = if (json.has("rpmR")) json.optDouble("rpmR").toFloat() else Float.NaN
+        rpmR  = if (json.has("rpmR")) json.optDouble("rpmR").toFloat() else Float.NaN,
+        dist  = json.optInt("dist", 0)   // v1.3: HC-SR04
     )
 
     fun stop() {

@@ -125,6 +125,23 @@
             android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="X:0.00 Y:0.00 H:0° D:0.0m"
             android:textColor="#80CBC4" android:textSize="11sp" />
+
+        <!-- Строка 4: HC-SR04 расстояние -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="📏" android:textSize="12sp" android:paddingEnd="4dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="DIST:" android:textColor="#888" android:textSize="12sp" />
+            <TextView android:id="@+id/tv_dist"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="-- cm" android:textColor="#64FFDA" android:textSize="12sp"
+                android:textStyle="bold" android:paddingStart="4dp" />
+        </LinearLayout>
     </LinearLayout>
 
     <!-- Слой 4: Нижняя панель управления — слайдеры + кнопки -->
