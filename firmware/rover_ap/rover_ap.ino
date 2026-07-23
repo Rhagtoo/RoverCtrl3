@@ -63,8 +63,10 @@ IPAddress lastSenderIP;
 uint16_t  lastSenderPort = 0;
 bool      haveSender = false;
 
-const int SERVO_LEFT  = 128;
-const int SERVO_RIGHT = 62;
+// Калибровка руля — симметрично относительно 90°
+// Центр (str=0) = (LEFT+RIGHT)/2 должен быть 90°
+const int SERVO_LEFT  = 123;  // было 128 → центр был (128+62)/2=95°
+const int SERVO_RIGHT = 57;   // было 62  → теперь (123+57)/2=90°
 
 // ====== Heartbeat ======
 // Heartbeat теперь НЕ зависит от непрерывности UDP.
