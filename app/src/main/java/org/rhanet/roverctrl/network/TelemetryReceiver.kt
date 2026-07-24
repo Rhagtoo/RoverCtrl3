@@ -12,8 +12,8 @@ import java.net.SocketException
  * TelemetryReceiver — приём телеметрии от ровера по UDP
  *
  * Слушает UDP :port.
- * Ровер шлёт каждые 500мс:
- *   {"bat":N,"yaw":F,"spd":N,"pit":F,"rol":F,"rssi":N,"rpmL":F,"rpmR":F}
+ * Ровер шлёт каждые 100мс (v1.4+):
+ *   {"bat":N,"yaw":F,"spd":N,"pit":F,"rol":F,"rssi":N,"rpmL":F,"rpmR":F,"dist":N,"sonarStop":N}
  *
  * Две сигнатуры receive():
  *   - Простая:     receive(port) { data -> ... }
@@ -132,7 +132,9 @@ class TelemetryReceiver {
         roll  = json.optDouble("rol", 0.0).toFloat(),
         rssi  = json.optInt("rssi", 0),
         rpmL  = if (json.has("rpmL")) json.optDouble("rpmL").toFloat() else Float.NaN,
-        rpmR  = if (json.has("rpmR")) json.optDouble("rpmR").toFloat() else Float.NaN
+        rpmR  = if (json.has("rpmR")) json.optDouble("rpmR").toFloat() else Float.NaN,
+        dist  = json.optInt("dist", 0),                 // v2.8: сонар, см
+        sonarStop = json.optInt("sonarStop", 0) != 0    // v2.8: экстренный тормоз
     )
 
     fun stop() {

@@ -45,6 +45,8 @@ class ControlFragment : Fragment() {
     private lateinit var tvRpmR:        TextView
     private lateinit var tvYaw:         TextView
     private lateinit var tvRssi:        TextView
+    private lateinit var tvDist:        TextView
+    private lateinit var tvSonarStop:   TextView
     private lateinit var tvOdom:        TextView
     private lateinit var tvGyroDebug:   TextView
 
@@ -79,6 +81,8 @@ class ControlFragment : Fragment() {
         tvRpmR        = view.findViewById(R.id.tv_rpm_r)
         tvYaw         = view.findViewById(R.id.tv_yaw)
         tvRssi        = view.findViewById(R.id.tv_rssi)
+        tvDist        = view.findViewById(R.id.tv_dist)
+        tvSonarStop   = view.findViewById(R.id.tv_sonar_stop)
         tvOdom        = view.findViewById(R.id.tv_odom)
         tvGyroDebug   = view.findViewById(R.id.tv_gyro_debug)
         pipContainer  = view.findViewById(R.id.pip_container)
@@ -255,6 +259,16 @@ class ControlFragment : Fragment() {
                 }
 
                 tvYaw.text = String.format("%.0f°", t.yaw)
+
+                // v2.8: сонар
+                tvDist.text = if (t.dist > 0) "${t.dist} cm" else "--"
+                tvDist.setTextColor(when {
+                    t.dist in 1..30 -> 0xFFFF5252.toInt()  // красный — близко!
+                    t.dist in 31..80 -> 0xFFFFAB00.toInt()  // жёлтый
+                    t.dist > 80 -> 0xFF80CBC4.toInt()       // норма
+                    else -> 0xFF666666.toInt()               // нет данных
+                })
+                tvSonarStop.visibility = if (t.sonarStop) View.VISIBLE else View.GONE
             }
         }
 
