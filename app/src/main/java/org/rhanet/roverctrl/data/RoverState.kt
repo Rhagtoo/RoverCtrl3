@@ -5,7 +5,7 @@ import android.content.Context
 /**
  * Телеметрия (ровер → телефон, UDP :4211, JSON)
  *
- * v2.8: добавлены dist (сонар, см) и sonarStop (экстренный тормоз)
+ * v2.8: добавлены dist (сонар, см), sonarStop, dir (направление)
  * v2.7: добавлено поле str (команда руления) для одометрии Ackermann
  */
 data class TelemetryData(
@@ -13,6 +13,7 @@ data class TelemetryData(
     val yaw: Float = 0f,
     val spd: Float = 0f,      // мощность мотора % (abs(FWD)), НЕ реальная скорость!
     val str: Int = 0,          // команда руления -100..+100 (из прошивки)
+    val dir: Int = 0,          // v2.8: направление 1=вперёд, -1=назад, 0=стоп
     val pitch: Float = 0f,
     val roll: Float = 0f,
     val rssi: Int = 0,

@@ -59,10 +59,12 @@ class OdometryTracker(
      * @param rpmR    RPM правого колеса (NaN → fallback)
      * @param spdPct  мощность мотора % из телеметрии (0..100, fallback)
      * @param strPct  команда руления -100..+100 (из телеметрии или команды)
+     * @param dir     направление: 1=вперёд, -1=назад, 0=стоп (для fallback)
      */
     fun update(
         rpmL: Float, rpmR: Float,
         spdPct: Float, strPct: Float,
+        dir: Int = 0,
         nowMs: Long = System.currentTimeMillis(),
     ) {
         if (lastUpdateMs == 0L) {
@@ -84,8 +86,9 @@ class OdometryTracker(
             velocity = avgRpm / 60f * circumference
         } else {
             // Fallback: оценка из % мощности (грубо)
+            // dir корректирует знак: 1=вперёд, -1=назад
             val vMax = 2.0f  // предполагаемая макс скорость м/с (для wheelDiameter=0.068м)
-            velocity = spdPct / 100f * vMax
+            velocity = (spdPct / 100f * vMax) * (if (dir != 0) dir.toFloat() else 1f)
         }
 
         currentSpeedMs = abs(velocity)

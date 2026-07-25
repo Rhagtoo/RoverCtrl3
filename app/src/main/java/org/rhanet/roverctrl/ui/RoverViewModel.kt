@@ -178,7 +178,8 @@ class RoverViewModel : ViewModel() {
             rpmL   = data.rpmL,
             rpmR   = data.rpmR,
             spdPct = data.spd,
-            strPct = data.str.toFloat()
+            strPct = data.str.toFloat(),
+            dir    = data.dir
         )
         _pose.value = odometry.pose
     }
