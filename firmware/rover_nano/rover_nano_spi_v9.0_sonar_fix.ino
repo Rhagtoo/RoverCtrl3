@@ -420,19 +420,23 @@ void measureDistance() {
 
         } else {
           // Некорректная длительность — оставляем предыдущее значение
-          // (не обнуляем — это не ошибка измерения, а возможно дальний объект)
         }
 
-        // ── v9.0.1: проверка порога замедления (не стоп!) ────────────
         sonarSlowdown = (distanceCm > 0 && distanceCm < SONAR_SLOWDOWN_CM);
-
         sonarState = SONAR_IDLE;
+
+      // ECHO всё ещё HIGH: таймаут на случай залипания
+      } else if (echo == HIGH && sonarEchoStart != 0) {
+        if (micros() - sonarEchoStart > 30000) {
+          // HIGH держится >30 мс → шум/залипание. Сброс.
+          sonarEchoStart = 0;
+          sonarState = SONAR_IDLE;
+        }
 
       // ECHO всё ещё LOW после TRIG: ждём таймаута
       } else if (echo == LOW && sonarEchoStart == 0) {
         if (micros() - sonarTrigStart > 30000) {
-          // Таймаут 30 мс (~5 метров) — нет объекта в радиусе действия
-          sonarSlowdown = false;  // препятствия нет — полная скорость
+          sonarSlowdown = false;
           sonarState = SONAR_IDLE;
         }
       }
