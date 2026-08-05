@@ -1,8 +1,11 @@
 // ============================================================
 //  A4A_SPI.ino — ESP32-S3: WiFi AP + UDP приём + SPI master → Nano
 //
+//  v1.6: +TURP/TILT в UDP (лазерная турель). rsvd1/rsvd2 SPI фрейма
+//        переиспользованы под turret_pan (0-180°) и turret_tilt (0-180°).
+//        Убран сонар из телеметрии (distance_cm, sonarStop).
 //  v1.5: +dir в телеметрии (направление для одометрии).
-  v1.4: sonarStop в телеметрии (bit4 статуса Nano). Телеметрия 100 мс (было 200).
+//  v1.4: sonarStop в телеметрии (bit4 статуса Nano). Телеметрия 100 мс (было 200).
 //  v1.3: Добавлена поддержка HC-SR04: distance_cm из SPI-ответа → телеметрия.
 //  v1.1: Одна SPI-транзакция на обмен (вместо двух). Ответ Nano
 //        всегда на 1 фрейм позади (телеметрия от предыдущей команды) —
@@ -80,6 +83,7 @@ const int SERVO_RIGHT = 57;   // было 62  → теперь (123+57)/2=90°
 #define HEARTBEAT_MS 100
 
 int lastSpd = 0, lastStr = 0, lastFwd = 0, lastLaser = 0;
+int lastTurp = 90, lastTilt = 90;  // v1.6: турель
 unsigned long lastUdpRxTime     = 0;
 unsigned long lastHeartbeatSent = 0;
 
@@ -91,8 +95,8 @@ struct CmdFrame {
   uint8_t pwm_right;
   uint8_t servo_angle;
   uint8_t flags;       // bit0=laser, bit1=dir_L, bit2=dir_R, bit3=enable
-  uint8_t rsvd1;
-  uint8_t rsvd2;
+  uint8_t turret_pan;  // v1.6: лазерный туррет pan (0-180°)
+  uint8_t turret_tilt; // v1.6: лазерный туррет tilt (0-180°)
   uint8_t crc;         // XOR bytes 0-6
 };
 
@@ -103,7 +107,7 @@ struct RspFrame {
   uint8_t servo_actual;
   uint8_t status;      // bit0=laser, bit1=wd_ok, bit2=fault
   uint8_t bat_raw;
-  uint8_t distance_cm; // v1.3: HC-SR04 расстояние, 0-255 см (0 = нет данных)
+  uint8_t rsvd;        // v1.6: бывший distance_cm (сонар удалён)
   uint8_t crc;
 };
 
@@ -124,14 +128,14 @@ struct NanoTelem {
   uint8_t servo_actual;
   uint8_t status;
   uint8_t bat_raw;
-  uint8_t distance_cm;   // v1.3: HC-SR04
   bool valid;
 } nanoTelem = {0};
 
 // Одна транзакция: отправляем команду, одновременно читаем ответ Nano.
 // Ответ содержит телеметрию от ПРЕДЫДУЩЕЙ команды (Nano заполняет spi_rsp
 // после обработки очередного фрейма). Задержка в 1 фрейм (128 мкс) — незаметна.
-bool spiExchange(int pwm_l, int pwm_r, int servo, bool laser, bool dir_l, bool dir_r, bool enable) {
+bool spiExchange(int pwm_l, int pwm_r, int servo, bool laser, bool dir_l, bool dir_r, bool enable,
+                 int turret_pan = 90, int turret_tilt = 90) {
   CmdFrame cmd;
   cmd.marker      = 0xA5;
   cmd.pwm_left    = (uint8_t)constrain(abs(pwm_l), 0, 255);
@@ -141,8 +145,8 @@ bool spiExchange(int pwm_l, int pwm_r, int servo, bool laser, bool dir_l, bool d
                   | (dir_l   ? 0x02 : 0x00)
                   | (dir_r   ? 0x04 : 0x00)
                   | (enable  ? 0x08 : 0x00);
-  cmd.rsvd1 = 0;
-  cmd.rsvd2 = 0;
+  cmd.turret_pan  = (uint8_t)constrain(turret_pan,  0, 180);
+  cmd.turret_tilt = (uint8_t)constrain(turret_tilt, 0, 180);
   cmd.crc   = crc8((uint8_t*)&cmd, 7);
 
   RspFrame rsp;
@@ -183,15 +187,14 @@ bool spiExchange(int pwm_l, int pwm_r, int servo, bool laser, bool dir_l, bool d
   nanoTelem.servo_actual = rsp.servo_actual;
   nanoTelem.status       = rsp.status;
   nanoTelem.bat_raw      = rsp.bat_raw;
-  nanoTelem.distance_cm   = rsp.distance_cm;   // v1.3
   nanoTelem.valid        = true;
 
   if (DBG_SPI) {
-    Serial.printf("[SPI] CMD: pwm=%d,%d sv=%d fl=0x%02X | "
-                  "RSP: mk=0x%02X echo=%d,%d sv=%d st=0x%02X bat=%d dist=%d\n",
-                  pwm_l, pwm_r, servo, cmd.flags,
+    Serial.printf("[SPI] CMD: pwm=%d,%d sv=%d fl=0x%02X tur=%d,%d | "
+                  "RSP: mk=0x%02X echo=%d,%d sv=%d st=0x%02X bat=%d\n",
+                  pwm_l, pwm_r, servo, cmd.flags, turret_pan, turret_tilt,
                   rsp.marker, rsp.pwm_l_echo, rsp.pwm_r_echo,
-                  rsp.servo_actual, rsp.status, rsp.bat_raw, rsp.distance_cm);
+                  rsp.servo_actual, rsp.status, rsp.bat_raw);
   }
 
   return true;
@@ -261,43 +264,50 @@ void loop() {
     if (len > 0) incomingPacket[len] = 0;
 
     int spd = 0, str = 0, fwd = 0, laser = 0, gear = 0;
+    int turp = 90, tilt = 90;  // v1.6: лазерная турель
 
     // v1.2: RAW пакет ДО парсинга — видим что реально шлёт телефон
     Serial.printf("[PKT RAW] '%s' (%d bytes)\n", incomingPacket, len);
 
     sscanf(incomingPacket, "SPD:%d;STR:%d;FWD:%d;LASER:%d;GEAR:%d", &spd, &str, &fwd, &laser, &gear);
 
+    // v1.6: парсинг турели
+    if (char* p = strstr(incomingPacket, "TURP:")) turp = atoi(p + 5);
+    if (char* p = strstr(incomingPacket, "TILT:")) tilt = atoi(p + 5);
+
     str   = constrain(str, -100, 100);
     laser = (laser != 0) ? 1 : 0;
+    turp  = constrain(turp, 0, 180);
+    tilt  = constrain(tilt, 0, 180);
 
     if (DBG_RX_SERIAL) {
-      Serial.printf("[RX %s:%u] %s\n  parsed: SPD=%d STR=%d FWD=%d LASER=%d GEAR=%d\n",
-                     lastSenderIP.toString().c_str(), lastSenderPort, incomingPacket, spd, str, fwd, laser, gear);
+      Serial.printf("[RX %s:%u] %s\n  parsed: SPD=%d STR=%d FWD=%d LASER=%d GEAR=%d TURP=%d TILT=%d\n",
+                     lastSenderIP.toString().c_str(), lastSenderPort, incomingPacket,
+                     spd, str, fwd, laser, gear, turp, tilt);
     }
 
     bool dir_forward = (spd >= 0);
     int pwm_val = map(constrain(abs(spd), 0, 100), 0, 100, 0, 255);
     int servoAngle = map(str, -100, 100, SERVO_RIGHT, SERVO_LEFT);
 
-    spiExchange(pwm_val, pwm_val, servoAngle, laser, dir_forward, dir_forward, true);
+    spiExchange(pwm_val, pwm_val, servoAngle, laser, dir_forward, dir_forward, true, turp, tilt);
 
     lastSpd = spd; lastStr = str; lastFwd = fwd; lastLaser = laser;
+    lastTurp = turp; lastTilt = tilt;
     lastUdpRxTime = millis();
     lastHeartbeatSent = lastUdpRxTime;
 
-    // ACK + телеметрия (v1.5: dir для одометрии)
+    // ACK + телеметрия (v1.6: убран сонар)
     int bat_pct = (nanoTelem.bat_raw > 0) ? map(nanoTelem.bat_raw, 0, 128, 0, 100) : 100;
-    bool sonarStop = (nanoTelem.status & 0x10) != 0;
     int dir = (fwd > 0 ? 1 : (fwd < 0 ? -1 : 0));
-    char ackBuf[220];
+    char ackBuf[200];
     snprintf(ackBuf, sizeof(ackBuf),
       "{\"ack\":1,\"cmd\":1,\"spd\":%d,\"str\":%d,\"fwd\":%d,"
       "\"dir\":%d,\"bat\":%d,\"rpmL\":%.1f,\"rpmR\":%.1f,"
-      "\"sv\":%d,\"st\":%d,\"dist\":%d,\"sonarStop\":%d}",
+      "\"sv\":%d,\"st\":%d}",
       abs(spd), str, fwd, dir,
       bat_pct, rpmL, rpmR,
-      nanoTelem.servo_actual, nanoTelem.status,
-      nanoTelem.distance_cm, sonarStop ? 1 : 0);
+      nanoTelem.servo_actual, nanoTelem.status);
     sendUdpReply(ackBuf);
   }
 
@@ -329,7 +339,7 @@ void loop() {
     bool dir_fwd = (lastSpd >= 0);
     int servoAngle = map(lastStr, -100, 100, SERVO_RIGHT, SERVO_LEFT);
 
-    bool ok = spiExchange(pwm_val, pwm_val, servoAngle, lastLaser, dir_fwd, dir_fwd, true);
+    bool ok = spiExchange(pwm_val, pwm_val, servoAngle, lastLaser, dir_fwd, dir_fwd, true, lastTurp, lastTilt);
     lastHeartbeatSent = nowHb;
     hbCount++;
 
@@ -356,34 +366,27 @@ void loop() {
     char telBuf[200];
     int bat_pct = (nanoTelem.bat_raw > 0) ? map(nanoTelem.bat_raw, 0, 128, 0, 100) : 100;
 
-    // v1.4: sonar_stop от Nano (bit4 статуса)
-    bool sonarStop = (nanoTelem.status & 0x10) != 0;
-
     int dir = (lastSpd > 0 ? 1 : (lastSpd < 0 ? -1 : 0));  // v1.5: направление для одометрии
     if (abs(rpmL) > 0.01f || abs(rpmR) > 0.01f) {
       snprintf(telBuf, sizeof(telBuf),
         "{\"bat\":%d,\"yaw\":0.0,\"spd\":%d,\"str\":%d,"
         "\"dir\":%d,"
         "\"pit\":0.0,\"rol\":0.0,\"rssi\":%d,"
-        "\"rpmL\":%.1f,\"rpmR\":%.1f,\"dist\":%d,\"sonarStop\":%d}",
-        bat_pct, abs(lastSpd), lastStr, dir, WiFi.RSSI(), rpmL, rpmR,
-        nanoTelem.distance_cm, sonarStop ? 1 : 0);
+        "\"rpmL\":%.1f,\"rpmR\":%.1f}",
+        bat_pct, abs(lastSpd), lastStr, dir, WiFi.RSSI(), rpmL, rpmR);
     } else {
       snprintf(telBuf, sizeof(telBuf),
         "{\"bat\":%d,\"yaw\":0.0,\"spd\":%d,\"str\":%d,"
         "\"dir\":%d,"
-        "\"pit\":0.0,\"rol\":0.0,\"rssi\":%d,"
-        "\"dist\":%d,\"sonarStop\":%d}",
-        bat_pct, abs(lastSpd), lastStr, dir, WiFi.RSSI(),
-        nanoTelem.distance_cm, sonarStop ? 1 : 0);
+        "\"pit\":0.0,\"rol\":0.0,\"rssi\":%d}",
+        bat_pct, abs(lastSpd), lastStr, dir, WiFi.RSSI());
     }
 
-    // v1.3: отладка — видим что реально шлём
     static unsigned long telemCount = 0;
     telemCount++;
-    if (telemCount % 10 == 0) {  // каждые 10-й пакет (~2 сек)
-      Serial.printf("[TELEM #%lu] dist=%d bat=%d spd=%d\n",
-                    telemCount, nanoTelem.distance_cm, bat_pct, abs(lastSpd));
+    if (telemCount % 10 == 0) {  // каждые 10-й пакет (~1 сек)
+      Serial.printf("[TELEM #%lu] bat=%d spd=%d tur=%d,%d\n",
+                    telemCount, bat_pct, abs(lastSpd), lastTurp, lastTilt);
     }
 
     udp.beginPacket(lastSenderIP, TELEM_PORT);

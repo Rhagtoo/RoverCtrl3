@@ -26,7 +26,6 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.rhanet.roverctrl.R
@@ -37,19 +36,20 @@ import org.rhanet.roverctrl.tracking.LatencyTracker
 import org.rhanet.roverctrl.tracking.ObjectTracker
 import org.rhanet.roverctrl.ui.RoverViewModel
 import org.rhanet.roverctrl.ui.control.JoystickView
+import org.rhanet.roverctrl.ui.control.SliderView
 import androidx.navigation.fragment.findNavController
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * VideoFragment v2.8
+ * VideoFragment v2.9
  *
- * PERF changes:
- *   - Inference gate (AtomicBoolean): prevents executor queue buildup
- *     If inference is running, new XIAO frames are skipped instead of queued
- *   - Dropped frames counted in latency HUD
- *   - Reduced per-frame allocations
+ * XIAO удалён (сгорела). Управление лазерной турелью через полоски (SliderView):
+ *   - Горизонтальная: PAN (лево/право)
+ *   - Вертикальная: TILT (вверх/вниз)
+ * Команды идут через Rover UDP (TURP/TILT) → ESP32 AP → SPI → Nano (D6/D9).
+ *
+ * Убран весь XIAO-зависимый код: swap, PiP, joystickCam, processXiaoFrame.
  */
 @androidx.camera.camera2.interop.ExperimentalCamera2Interop
 class VideoFragment : Fragment() {
@@ -60,45 +60,37 @@ class VideoFragment : Fragment() {
     private val analysisExecutor = Executors.newSingleThreadExecutor()
     private val latency = LatencyTracker(windowSize = 30)
 
-    // v2.8: inference gate — prevents queueing frames when analysis is busy
-    private val inferenceRunning = AtomicBoolean(false)
-    private var droppedAnalysisFrames = 0L
-
     private lateinit var previewView:       PreviewView
     private lateinit var overlay:           TrackingOverlayView
-    private lateinit var overlayXiao:       TrackingOverlayView
     private lateinit var spinnerMode:       Spinner
     private lateinit var tvFps:             TextView
     private lateinit var tvStatus:          TextView
     private lateinit var tvLatency:         TextView
 
-    private lateinit var pipContainer:      FrameLayout
-    private lateinit var ivTurretPip:       ImageView
-    private lateinit var tvTurretFps:       TextView
-    private lateinit var tvPipSourceLabel:  TextView
-    private lateinit var btnPipVideo:       ToggleButton
-    private lateinit var btnSwapVideo:      ToggleButton
-    private lateinit var ivXiaoMain:        ImageView
-    private lateinit var tvMainSourceLabel: TextView
+    // Turret sliders (v2.9: замена joystickCam)
+    private lateinit var sliderTurretPan:   SliderView
+    private lateinit var sliderTurretTilt:  SliderView
 
     private lateinit var joystickDrive:     JoystickView
-    private lateinit var joystickCam:       JoystickView
     private lateinit var tvDriveLabel:      TextView
-    private lateinit var tvCamLabel:        TextView
     private lateinit var btnLaserVideo:     ToggleButton
 
-    private var swapped = false
     private var laserTracker:  LaserTracker?  = null
     private var objectTracker: ObjectTracker? = null
 
-    private fun trackingOverlay(): TrackingOverlayView = if (swapped) overlayXiao else overlay
+    // v2.9: Xiaо удалён — trackingOverlay всегда overlay (без swap)
+    private fun trackingOverlay(): TrackingOverlayView = overlay
+
     private var cameraProvider: ProcessCameraProvider? = null
-    private var xiaoAnalysisJob: Job? = null
 
     private var frameCount = 0
     private var lastFpsTime = System.currentTimeMillis()
     private var lastCameraFps = 0f
     private var lastLatencyUpdate = 0L
+
+    // v2.9: turret slider values (-1..+1 normalised)
+    private var turretPanVal  = 0f
+    private var turretTiltVal = 0f
 
     private val permLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -113,24 +105,17 @@ class VideoFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         previewView        = view.findViewById(R.id.preview_view)
         overlay            = view.findViewById(R.id.overlay)
-        overlayXiao        = view.findViewById(R.id.overlay_xiao)
         spinnerMode        = view.findViewById(R.id.spinner_mode)
         tvFps              = view.findViewById(R.id.tv_fps)
         tvStatus           = view.findViewById(R.id.tv_status)
         tvLatency          = view.findViewById(R.id.tv_latency)
-        ivXiaoMain         = view.findViewById(R.id.iv_xiao_main)
-        tvMainSourceLabel  = view.findViewById(R.id.tv_main_source_label)
-        pipContainer       = view.findViewById(R.id.pip_container_video)
-        ivTurretPip        = view.findViewById(R.id.iv_turret_pip_video)
-        tvTurretFps        = view.findViewById(R.id.tv_turret_fps_video)
-        tvPipSourceLabel   = view.findViewById(R.id.tv_pip_source_label)
-        btnPipVideo        = view.findViewById(R.id.btn_pip_video)
-        btnSwapVideo       = view.findViewById(R.id.btn_swap_video)
         joystickDrive      = view.findViewById(R.id.joystick_drive_video)
-        joystickCam        = view.findViewById(R.id.joystick_cam_video)
         tvDriveLabel       = view.findViewById(R.id.tv_drive_label_video)
-        tvCamLabel         = view.findViewById(R.id.tv_cam_label_video)
         btnLaserVideo      = view.findViewById(R.id.btn_laser_video)
+
+        // v2.9: полоски турели
+        sliderTurretPan   = view.findViewById(R.id.slider_turret_pan)
+        sliderTurretTilt  = view.findViewById(R.id.slider_turret_tilt)
 
         val toolbarVideo = view.findViewById<View>(R.id.toolbar_video)
         ViewCompat.setOnApplyWindowInsetsListener(toolbarVideo) { v, insets ->
@@ -138,18 +123,13 @@ class VideoFragment : Fragment() {
             v.setPadding(v.paddingLeft, sb.top, v.paddingRight, v.paddingBottom)
             insets
         }
-        ViewCompat.setOnApplyWindowInsetsListener(joystickCam) { v, insets ->
-            val sb = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(v.paddingLeft, v.paddingTop, sb.right, v.paddingBottom)
-            insets
-        }
+        // Убрана обработка insets для joystickCam — sliders не нуждаются
 
         tvLatency.text = "-- ms"
         tvLatency.visibility = View.VISIBLE
 
         setupModeSpinner()
-        setupPip()
-        setupSwap()
+        setupTurretSliders()
         setupOverlayControls()
 
         view.findViewById<Button>(R.id.btn_calibrate).setOnClickListener {
@@ -174,7 +154,6 @@ class VideoFragment : Fragment() {
                     updateLatencyManual()
                 }
                 updateOverlayControlsVisibility(mode)
-                updateXiaoAnalysis()
             }
         }
 
@@ -189,6 +168,35 @@ class VideoFragment : Fragment() {
         if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA)
             == PackageManager.PERMISSION_GRANTED) startCamera()
         else permLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    // ── Turret Sliders (v2.9) ─────────────────────────────────────────────
+
+    private fun setupTurretSliders() {
+        sliderTurretPan.orientation = SliderView.Orientation.HORIZONTAL
+        sliderTurretTilt.orientation = SliderView.Orientation.VERTICAL
+
+        sliderTurretPan.onMove = { value ->
+            turretPanVal = value
+            sendTurretCmd()
+        }
+        sliderTurretTilt.onMove = { value ->
+            turretTiltVal = value
+            sendTurretCmd()
+        }
+    }
+
+    /**
+     * Отправляет команды турели на ровер.
+     * value = -1..+1 (нормализованное), конвертируется в угол 0-180°:
+     *   PAN:  -1=влево(0°), 0=центр(90°), +1=вправо(180°)
+     *   TILT: -1=вниз(180°), 0=центр(90°), +1=вверх(0°)
+     */
+    private fun sendTurretCmd() {
+        val panAngle  = ((turretPanVal  * 90f) + 90f).toInt().coerceIn(0, 180)
+        val tiltAngle = ((-turretTiltVal * 90f) + 90f).toInt().coerceIn(0, 180)
+        // v2.9: panCmd/tiltCmd идут в sendRover как TURP/TILT
+        vm.setPanTilt(panAngle, tiltAngle)
     }
 
     // ── Latency ──────────────────────────────────────────────────────────
@@ -214,171 +222,8 @@ class VideoFragment : Fragment() {
                 else          -> 0xFFFF5252.toInt()
             }
             tvLatency.setTextColor(color)
-            // v2.8: show dropped frames count so user knows if pipeline is overloaded
-            val dropInfo = if (droppedAnalysisFrames > 0) " d:$droppedAnalysisFrames" else ""
-            tvLatency.text = "lat: %.0f ms · fps: %.0f%s".format(totalMs, lastCameraFps, dropInfo)
+            tvLatency.text = "lat: %.0f ms · fps: %.0f".format(totalMs, lastCameraFps)
         }
-    }
-
-    // ── PiP ──────────────────────────────────────────────────────────────
-
-    private fun setupPip() {
-        btnPipVideo.setOnCheckedChangeListener { _, c ->
-            pipContainer.visibility = if (c) View.VISIBLE else View.GONE
-        }
-        viewLifecycleOwner.lifecycleScope.launch {
-            vm.turretFrame.collectLatest { bmp ->
-                if (bmp != null) {
-                    if (swapped) {
-                        ivXiaoMain.setImageBitmap(bmp)
-                    }
-                    else if (pipContainer.visibility == View.VISIBLE) ivTurretPip.setImageBitmap(bmp)
-                }
-            }
-        }
-        viewLifecycleOwner.lifecycleScope.launch {
-            vm.turretFps.collectLatest { fps ->
-                tvTurretFps.text = if (fps > 0) "%.0f".format(fps) else "--"
-            }
-        }
-        viewLifecycleOwner.lifecycleScope.launch {
-            vm.turretConnected.collectLatest { if (it && !btnPipVideo.isChecked) btnPipVideo.isChecked = true }
-        }
-    }
-
-    // ── Swap ─────────────────────────────────────────────────────────────
-
-    private fun setupSwap() {
-        btnSwapVideo.setOnCheckedChangeListener { _, c -> setSwapped(c) }
-        pipContainer.setOnClickListener { btnSwapVideo.isChecked = !swapped }
-    }
-
-    private fun setSwapped(s: Boolean) {
-        Log.d(TAG, "setSwapped: $s")
-        swapped = s
-        val mode = vm.trackMode.value
-        if (swapped) {
-            ivXiaoMain.visibility = View.VISIBLE
-            previewView.visibility = View.INVISIBLE
-            tvMainSourceLabel.text = "XIAO"
-            tvMainSourceLabel.visibility = View.VISIBLE
-            tvPipSourceLabel.text = "PHONE"
-            pipContainer.visibility = View.GONE
-            btnPipVideo.isChecked = false
-        } else {
-            ivXiaoMain.visibility = View.GONE
-            previewView.visibility = View.VISIBLE
-            tvMainSourceLabel.visibility = View.GONE
-            tvPipSourceLabel.text = "TURRET"
-        }
-        updateOverlayVisibility(mode)
-        updateXiaoAnalysis()
-    }
-
-    private fun updateOverlayVisibility(mode: TrackingMode) {
-        val showTrackingOverlay = mode == TrackingMode.LASER_DOT || mode == TrackingMode.OBJECT_TRACK
-        val trackingActive = mode != TrackingMode.MANUAL && mode != TrackingMode.GYRO_TILT
-        overlay.trackingActive = trackingActive
-        overlayXiao.trackingActive = trackingActive
-        if (swapped) {
-            overlay.visibility = View.GONE
-            overlayXiao.visibility = if (showTrackingOverlay) View.VISIBLE else View.GONE
-        } else {
-            overlay.visibility = if (showTrackingOverlay) View.VISIBLE else View.GONE
-            overlayXiao.visibility = View.GONE
-        }
-    }
-
-    // ── XIAO Frame Analysis (swapped + tracking) ─────────────────────────
-
-    private fun updateXiaoAnalysis() {
-        xiaoAnalysisJob?.cancel()
-        val mode = vm.trackMode.value
-        if (swapped && (mode == TrackingMode.LASER_DOT || mode == TrackingMode.OBJECT_TRACK)) {
-            xiaoAnalysisJob = viewLifecycleOwner.lifecycleScope.launch {
-                vm.turretFrame.collectLatest { bmp ->
-                    if (bmp != null && swapped) {
-                        // v2.8: inference gate — skip frame if previous inference still running
-                        if (!inferenceRunning.compareAndSet(false, true)) {
-                            droppedAnalysisFrames++
-                            return@collectLatest
-                        }
-                        // Must copy: turretFrame can be recycled when next frame arrives
-                        val copy = bmp.copy(Bitmap.Config.ARGB_8888, false)
-                        if (copy == null) {
-                            inferenceRunning.set(false)
-                            return@collectLatest
-                        }
-                        analysisExecutor.execute {
-                            try {
-                                processXiaoFrame(copy)
-                            } finally {
-                                inferenceRunning.set(false)
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            inferenceRunning.set(false)
-        }
-    }
-
-    private fun processXiaoFrame(bitmap: Bitmap) {
-        val ft = latency.beginFrame()
-        latency.mark(ft, LatencyTracker.Stage.DECODED)
-        latency.mark(ft, LatencyTracker.Stage.INFERENCE_START)
-
-        val bitmapWidth = bitmap.width
-        val bitmapHeight = bitmap.height
-
-        when (vm.trackMode.value) {
-            TrackingMode.LASER_DOT -> {
-                val r = laserTracker?.process(bitmap)
-                latency.mark(ft, LatencyTracker.Stage.INFERENCE_END)
-                if (r != null && r.found) {
-                    vm.setPanTilt(r.panDelta.toInt(), r.tiltDelta.toInt())
-                    val label = r.detection?.label ?: ""
-                    vm.laserOn = label == "cat"
-                    latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post {
-                        val ov = trackingOverlay()
-                        ov.sourceImageWidth = bitmapWidth
-                        ov.sourceImageHeight = bitmapHeight
-                        ov.detection = r.detection
-                    }
-                } else handler.post {
-                    val ov = trackingOverlay()
-                    ov.sourceImageWidth = bitmapWidth
-                    ov.sourceImageHeight = bitmapHeight
-                    ov.detection = null
-                }
-            }
-            TrackingMode.OBJECT_TRACK -> {
-                val r = objectTracker?.process(bitmap)
-                latency.mark(ft, LatencyTracker.Stage.INFERENCE_END)
-                if (r != null && r.found) {
-                    vm.setPanTilt(r.panDelta.toInt(), r.tiltDelta.toInt())
-                    val label = r.detection?.label ?: ""
-                    vm.laserOn = label == "cat"
-                    latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
-                    handler.post {
-                        val ov = trackingOverlay()
-                        ov.sourceImageWidth = bitmapWidth
-                        ov.sourceImageHeight = bitmapHeight
-                        ov.detection = r.detection
-                    }
-                } else handler.post {
-                    val ov = trackingOverlay()
-                    ov.sourceImageWidth = bitmapWidth
-                    ov.sourceImageHeight = bitmapHeight
-                    ov.detection = null
-                }
-            }
-            else -> {}
-        }
-        bitmap.recycle()
-        maybeUpdateLatencyHud()
     }
 
     // ── Overlay Controls ─────────────────────────────────────────────────
@@ -386,10 +231,6 @@ class VideoFragment : Fragment() {
     private fun setupOverlayControls() {
         joystickDrive.onMove = { x, y ->
             vm.setDriveCmd((y*100).toInt(), (x*100).toInt(), (y*100).toInt())
-        }
-        joystickCam.onMove = { x, y ->
-            if (vm.trackMode.value == TrackingMode.MANUAL)
-                vm.setPanTilt((x*100).toInt(), (y*100).toInt())
         }
         btnLaserVideo.setOnCheckedChangeListener { _, c -> vm.laserOn = c }
         updateOverlayControlsVisibility(vm.trackMode.value)
@@ -400,15 +241,17 @@ class VideoFragment : Fragment() {
             TrackingMode.MANUAL, TrackingMode.LASER_DOT, TrackingMode.OBJECT_TRACK, TrackingMode.GYRO_TILT -> View.VISIBLE
             else -> View.GONE
         }
-        val showCam = when (mode) {
+        // v2.9: турельные полоски показываем всегда когда есть драйв (Manual и Gyro)
+        val showTurret = when (mode) {
             TrackingMode.MANUAL, TrackingMode.GYRO_TILT -> View.VISIBLE
             else -> View.GONE
         }
-        joystickDrive.visibility  = showDrive
-        joystickCam.visibility    = showCam
-        tvDriveLabel.visibility   = showDrive
-        tvCamLabel.visibility     = showCam
-        btnLaserVideo.visibility  = showDrive
+        joystickDrive.visibility      = showDrive
+        tvDriveLabel.visibility       = showDrive
+        btnLaserVideo.visibility      = showDrive
+        sliderTurretPan.visibility    = showTurret
+        sliderTurretTilt.visibility   = showTurret
+        requireView().findViewById<LinearLayout>(R.id.turret_sliders)?.visibility = showTurret
     }
 
     // ── CameraX ──────────────────────────────────────────────────────────
@@ -470,7 +313,8 @@ class VideoFragment : Fragment() {
         }
 
         val mode = vm.trackMode.value
-        if (swapped || mode == TrackingMode.MANUAL || mode == TrackingMode.GYRO_TILT) {
+        // v2.9: swapped удалён, Xiao нет. Трекинг только с телефона.
+        if (mode == TrackingMode.MANUAL || mode == TrackingMode.GYRO_TILT) {
             imageProxy.close()
             return
         }
@@ -495,16 +339,14 @@ class VideoFragment : Fragment() {
                     vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
                     handler.post {
-                        val ov = trackingOverlay()
-                        ov.sourceImageWidth = originalWidth
-                        ov.sourceImageHeight = originalHeight
-                        ov.detection = r.detection
+                        overlay.sourceImageWidth = originalWidth
+                        overlay.sourceImageHeight = originalHeight
+                        overlay.detection = r.detection
                     }
                 } else handler.post {
-                    val ov = trackingOverlay()
-                    ov.sourceImageWidth = originalWidth
-                    ov.sourceImageHeight = originalHeight
-                    ov.detection = null
+                    overlay.sourceImageWidth = originalWidth
+                    overlay.sourceImageHeight = originalHeight
+                    overlay.detection = null
                 }
             }
             TrackingMode.OBJECT_TRACK -> {
@@ -516,16 +358,14 @@ class VideoFragment : Fragment() {
                     vm.laserOn = label == "cat"
                     latency.mark(ft, LatencyTracker.Stage.CMD_SENT)
                     handler.post {
-                        val ov = trackingOverlay()
-                        ov.sourceImageWidth = originalWidth
-                        ov.sourceImageHeight = originalHeight
-                        ov.detection = r.detection
+                        overlay.sourceImageWidth = originalWidth
+                        overlay.sourceImageHeight = originalHeight
+                        overlay.detection = r.detection
                     }
                 } else handler.post {
-                    val ov = trackingOverlay()
-                    ov.sourceImageWidth = originalWidth
-                    ov.sourceImageHeight = originalHeight
-                    ov.detection = null
+                    overlay.sourceImageWidth = originalWidth
+                    overlay.sourceImageHeight = originalHeight
+                    overlay.detection = null
                 }
             }
             else -> {}
@@ -570,6 +410,17 @@ class VideoFragment : Fragment() {
         if (r !== bmp) bmp.recycle()
         return r
     }
+
+    // ── Visibility ────────────────────────────────────────────────────────
+
+    private fun updateOverlayVisibility(mode: TrackingMode) {
+        val showTrackingOverlay = mode == TrackingMode.LASER_DOT || mode == TrackingMode.OBJECT_TRACK
+        val trackingActive = mode != TrackingMode.MANUAL && mode != TrackingMode.GYRO_TILT
+        overlay.trackingActive = trackingActive
+        overlay.visibility = if (showTrackingOverlay) View.VISIBLE else View.GONE
+    }
+
+    // ── Mode Spinner ──────────────────────────────────────────────────────
 
     private fun setupModeSpinner() {
         val modes = resources.getStringArray(R.array.tracking_modes)
@@ -616,12 +467,10 @@ class VideoFragment : Fragment() {
 
     override fun onStop() {
         super.onStop()
-        xiaoAnalysisJob?.cancel()
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
-        xiaoAnalysisJob?.cancel()
         cameraProvider?.unbindAll()
         objectTracker?.close()
         analysisExecutor.shutdown()
