@@ -35,21 +35,20 @@ import org.rhanet.roverctrl.tracking.LaserTracker
 import org.rhanet.roverctrl.tracking.LatencyTracker
 import org.rhanet.roverctrl.tracking.ObjectTracker
 import org.rhanet.roverctrl.ui.RoverViewModel
-import org.rhanet.roverctrl.ui.control.JoystickView
 import org.rhanet.roverctrl.ui.control.SliderView
 import androidx.navigation.fragment.findNavController
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 
 /**
- * VideoFragment v2.9
+ * VideoFragment v3.0
  *
- * XIAO удалён (сгорела). Управление лазерной турелью через полоски (SliderView):
- *   - Горизонтальная: PAN (лево/право)
- *   - Вертикальная: TILT (вверх/вниз)
+ * Управление лазерной турелью через полоски (SliderView) — как на вкладке Control:
+ *   - Слева:  горизонтальная PAN (◄ ►)
+ *   - Справа: вертикальная TILT (▲ ▼)
+ * Джойстик движения убран — вместо него горизонтальная полоска PAN.
+ *
  * Команды идут через Rover UDP (TURP/TILT) → ESP32 AP → SPI → Nano (D6/D9).
- *
- * Убран весь XIAO-зависимый код: swap, PiP, joystickCam, processXiaoFrame.
  */
 @androidx.camera.camera2.interop.ExperimentalCamera2Interop
 class VideoFragment : Fragment() {
@@ -71,9 +70,9 @@ class VideoFragment : Fragment() {
     private lateinit var sliderTurretPan:   SliderView
     private lateinit var sliderTurretTilt:  SliderView
 
-    private lateinit var joystickDrive:     JoystickView
-    private lateinit var tvDriveLabel:      TextView
     private lateinit var btnLaserVideo:     ToggleButton
+    private lateinit var turretPanBlock:    LinearLayout
+    private lateinit var turretTiltBlock:   LinearLayout
 
     private var laserTracker:  LaserTracker?  = null
     private var objectTracker: ObjectTracker? = null
@@ -109,13 +108,13 @@ class VideoFragment : Fragment() {
         tvFps              = view.findViewById(R.id.tv_fps)
         tvStatus           = view.findViewById(R.id.tv_status)
         tvLatency          = view.findViewById(R.id.tv_latency)
-        joystickDrive      = view.findViewById(R.id.joystick_drive_video)
-        tvDriveLabel       = view.findViewById(R.id.tv_drive_label_video)
         btnLaserVideo      = view.findViewById(R.id.btn_laser_video)
 
-        // v2.9: полоски турели
-        sliderTurretPan   = view.findViewById(R.id.slider_turret_pan)
-        sliderTurretTilt  = view.findViewById(R.id.slider_turret_tilt)
+        // v3.0: полоски турели (PAN слева, TILT справа — как на control tab)
+        turretPanBlock     = view.findViewById(R.id.turret_pan_block)
+        turretTiltBlock    = view.findViewById(R.id.turret_tilt_block)
+        sliderTurretPan    = view.findViewById(R.id.slider_turret_pan)
+        sliderTurretTilt   = view.findViewById(R.id.slider_turret_tilt)
 
         val toolbarVideo = view.findViewById<View>(R.id.toolbar_video)
         ViewCompat.setOnApplyWindowInsetsListener(toolbarVideo) { v, insets ->
@@ -229,29 +228,19 @@ class VideoFragment : Fragment() {
     // ── Overlay Controls ─────────────────────────────────────────────────
 
     private fun setupOverlayControls() {
-        joystickDrive.onMove = { x, y ->
-            vm.setDriveCmd((y*100).toInt(), (x*100).toInt(), (y*100).toInt())
-        }
         btnLaserVideo.setOnCheckedChangeListener { _, c -> vm.laserOn = c }
         updateOverlayControlsVisibility(vm.trackMode.value)
     }
 
     private fun updateOverlayControlsVisibility(mode: TrackingMode) {
-        val showDrive = when (mode) {
-            TrackingMode.MANUAL, TrackingMode.LASER_DOT, TrackingMode.OBJECT_TRACK, TrackingMode.GYRO_TILT -> View.VISIBLE
-            else -> View.GONE
-        }
-        // v2.9: турельные полоски показываем всегда когда есть драйв (Manual и Gyro)
+        // v3.0: турельные полоски (PAN слева, TILT справа) — только в Manual/Gyro
         val showTurret = when (mode) {
             TrackingMode.MANUAL, TrackingMode.GYRO_TILT -> View.VISIBLE
             else -> View.GONE
         }
-        joystickDrive.visibility      = showDrive
-        tvDriveLabel.visibility       = showDrive
-        btnLaserVideo.visibility      = showDrive
-        sliderTurretPan.visibility    = showTurret
-        sliderTurretTilt.visibility   = showTurret
-        requireView().findViewById<LinearLayout>(R.id.turret_sliders)?.visibility = showTurret
+        turretPanBlock.visibility     = showTurret
+        turretTiltBlock.visibility    = showTurret
+        btnLaserVideo.visibility      = showTurret
     }
 
     // ── CameraX ──────────────────────────────────────────────────────────

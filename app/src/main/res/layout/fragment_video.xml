@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  fragment_video.xml v2.9 — XIAO удалён, турель на Nano через полоски
-  Заменён joystickCam на два SliderView (pan горизонтальный, tilt вертикальный)
-  Убраны: ivXiaoMain, overlay_xiao, pip_container, swap, PiP кнопки
+  fragment_video.xml v3.0 — полоски турели как на control tab:
+  PAN горизонтальная слева (замена джойстика), TILT вертикальная справа
 -->
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
@@ -33,33 +32,41 @@
         app:layout_constraintStart_toStartOf="@id/preview_view"
         app:layout_constraintEnd_toEndOf="@id/preview_view" />
 
-    <!-- ═══ Overlay: Drive джойстик (Manual/слева) ═══ -->
-    <org.rhanet.roverctrl.ui.control.JoystickView
-        android:id="@+id/joystick_drive_video"
-        android:layout_width="120dp"
-        android:layout_height="120dp"
-        android:alpha="0.45"
+    <!-- ═══ Overlay: полоска PAN турели (слева, заменяет джойстик) ═══ -->
+    <LinearLayout
+        android:id="@+id/turret_pan_block"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:alpha="0.85"
         android:visibility="gone"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintBottom_toTopOf="@id/toolbar_video"
-        android:layout_marginStart="24dp"
-        android:layout_marginBottom="24dp" />
+        android:layout_marginStart="20dp"
+        android:layout_marginBottom="16dp">
 
-    <TextView
-        android:id="@+id/tv_drive_label_video"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="DRIVE"
-        android:textColor="#80FFFFFF"
-        android:textSize="10sp"
-        android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/joystick_drive_video"
-        app:layout_constraintStart_toStartOf="@id/joystick_drive_video"
-        app:layout_constraintEnd_toEndOf="@id/joystick_drive_video" />
+        <TextView
+            android:id="@+id/tv_pan_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="◄ PAN ►"
+            android:textColor="#55FFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:paddingBottom="4dp" />
 
-    <!-- ═══ Overlay: полоски турели (справа, заменяют joystickCam) ═══ -->
+        <org.rhanet.roverctrl.ui.control.SliderView
+            android:id="@+id/slider_turret_pan"
+            android:layout_width="140dp"
+            android:layout_height="48dp"
+            android:alpha="0.85" />
+
+    </LinearLayout>
+
+    <!-- ═══ Overlay: полоска TILT турели (справа) ═══ -->
     <LinearLayout
-        android:id="@+id/turret_sliders"
+        android:id="@+id/turret_tilt_block"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="vertical"
@@ -68,35 +75,18 @@
         android:visibility="gone"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintBottom_toTopOf="@id/toolbar_video"
-        android:layout_marginEnd="16dp"
-        android:layout_marginBottom="12dp">
+        android:layout_marginEnd="20dp"
+        android:layout_marginBottom="16dp">
 
-        <!-- Горизонтальная полоска PAN -->
         <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="◄ PAN ►"
-            android:textColor="#55FFFFFF"
-            android:textSize="10sp"
-            android:textStyle="bold"
-            android:paddingBottom="2dp" />
-
-        <org.rhanet.roverctrl.ui.control.SliderView
-            android:id="@+id/slider_turret_pan"
-            android:layout_width="140dp"
-            android:layout_height="48dp"
-            android:alpha="0.85" />
-
-        <!-- Вертикальная полоска TILT -->
-        <TextView
+            android:id="@+id/tv_tilt_label"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="▲ TILT ▼"
             android:textColor="#55FFFFFF"
-            android:textSize="10sp"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:paddingTop="8dp"
-            android:paddingBottom="2dp" />
+            android:paddingBottom="4dp" />
 
         <org.rhanet.roverctrl.ui.control.SliderView
             android:id="@+id/slider_turret_tilt"
@@ -106,7 +96,7 @@
 
     </LinearLayout>
 
-    <!-- Лазер (Manual) -->
+    <!-- Лазер (Manual) — по центру между полосками -->
     <ToggleButton
         android:id="@+id/btn_laser_video"
         android:layout_width="48dp"
@@ -117,10 +107,10 @@
         android:background="#60333333"
         android:alpha="0.7"
         android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/turret_sliders"
-        app:layout_constraintEnd_toEndOf="@id/turret_sliders"
-        app:layout_constraintStart_toStartOf="@id/turret_sliders"
-        android:layout_marginBottom="8dp" />
+        app:layout_constraintBottom_toTopOf="@id/toolbar_video"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginBottom="12dp" />
 
     <!-- ═══ TOP-LEFT HUD: статус + латенси ═══ -->
     <LinearLayout
