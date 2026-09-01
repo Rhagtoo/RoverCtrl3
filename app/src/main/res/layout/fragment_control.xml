@@ -126,7 +126,7 @@
             android:text="X:0.00 Y:0.00 H:0° D:0.0m"
             android:textColor="#80CBC4" android:textSize="11sp" />
 
-        <!-- Строка 4: HC-SR04 расстояние -->
+        <!-- Строка 4: HC-SR04 расстояние  -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
