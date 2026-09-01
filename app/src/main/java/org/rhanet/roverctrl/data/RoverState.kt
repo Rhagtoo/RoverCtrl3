@@ -3,24 +3,27 @@ package org.rhanet.roverctrl.data
 import android.content.Context
 
 /**
- * Телеметрия (ровер → телефон, UDP :4211, JSON каждые 500мс)
+ * Телеметрия (ровер → телефон, UDP :4211, JSON)
  *
- * ИСПРАВЛЕНО: добавлено поле str (команда руления) для одометрии Ackermann
+ * v2.8: добавлены dist (сонар, см), sonarStop, dir (направление)
+ * v2.7: добавлено поле str (команда руления) для одометрии Ackermann
  */
 data class TelemetryData(
     val bat: Int = -1,
     val yaw: Float = 0f,
     val spd: Float = 0f,      // мощность мотора % (abs(FWD)), НЕ реальная скорость!
-    val str: Int = 0,          // ← НОВОЕ: команда руления -100..+100 (из прошивки)
+    val str: Int = 0,          // команда руления -100..+100 (из прошивки)
+    val dir: Int = 0,          // v2.8: направление 1=вперёд, -1=назад, 0=стоп
     val pitch: Float = 0f,
     val roll: Float = 0f,
     val rssi: Int = 0,
     val rpmL: Float = Float.NaN,
     val rpmR: Float = Float.NaN,
-    val dist: Int = 0           // v1.3: HC-SR04 расстояние в см (0 = нет данных)
+    val dist: Int = 0,         // v2.8: сонар HC-SR04, см (0 = нет данных)
+    val sonarStop: Boolean = false  // v2.8: экстренный тормоз (dist < 30 см)
 ) {
     companion object {
-        private const val WHEEL_DIAMETER_M = 0.065f
+        private const val WHEEL_DIAMETER_M = 0.068f  // диаметр колеса с резиной 6.8 см = 0.068 м
     }
 
     /** Реальная линейная скорость (м/с) из RPM энкодеров */

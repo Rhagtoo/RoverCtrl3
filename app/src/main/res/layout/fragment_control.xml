@@ -120,7 +120,29 @@
                 android:paddingStart="10dp" />
         </LinearLayout>
 
-        <!-- Строка 3: одометрия -->
+        <!-- Строка 3: DIST (сонар) + SONAR_STOP -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="DIST:" android:textColor="#888" android:textSize="11sp" />
+            <TextView android:id="@+id/tv_dist"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="--" android:textColor="#80CBC4" android:textSize="11sp"
+                android:textStyle="bold" android:paddingStart="2dp" android:paddingEnd="12dp" />
+
+            <TextView android:id="@+id/tv_sonar_stop"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="SONAR STOP" android:textColor="#FF5252"
+                android:textSize="11sp" android:textStyle="bold"
+                android:visibility="gone" android:paddingHorizontal="6dp"
+                android:background="#44FF0000" />
+        </LinearLayout>
+
+        <!-- Строка 4: одометрия -->
         <TextView android:id="@+id/tv_odom"
             android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="X:0.00 Y:0.00 H:0° D:0.0m"

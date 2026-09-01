@@ -24,9 +24,9 @@ import kotlin.math.*
  * ═══════════════════════════════════════════════════════════════════════
  */
 class OdometryTracker(
-    private val wheelDiameter: Float = 0.065f,     // м — диаметр колеса
-    private val wheelBase: Float = 0.160f,          // м — расстояние между осями (не колёсами!)
-    private val maxSteerAngleDeg: Float = 30f,      // макс угол поворота колёс (градусы)
+    private val wheelDiameter: Float = 0.068f,     // диаметр колеса с резиной 6.8 см = 0.068 м
+    private val wheelBase: Float = 0.180f,          // м — расстояние между осями (18 см)
+    private val maxSteerAngleDeg: Float = 18f,      // макс угол поворота колёс (градусы) после изменения сервопривода 60-120
 ) {
     data class Pose(val x: Float, val y: Float, val headingRad: Float)
 
@@ -59,10 +59,12 @@ class OdometryTracker(
      * @param rpmR    RPM правого колеса (NaN → fallback)
      * @param spdPct  мощность мотора % из телеметрии (0..100, fallback)
      * @param strPct  команда руления -100..+100 (из телеметрии или команды)
+     * @param dir     направление: 1=вперёд, -1=назад, 0=стоп (для fallback)
      */
     fun update(
         rpmL: Float, rpmR: Float,
         spdPct: Float, strPct: Float,
+        dir: Int = 0,
         nowMs: Long = System.currentTimeMillis(),
     ) {
         if (lastUpdateMs == 0L) {
@@ -84,8 +86,9 @@ class OdometryTracker(
             velocity = avgRpm / 60f * circumference
         } else {
             // Fallback: оценка из % мощности (грубо)
-            val vMax = 0.5f  // предполагаемая макс скорость м/с
-            velocity = spdPct / 100f * vMax
+            // dir корректирует знак: 1=вперёд, -1=назад
+            val vMax = 2.0f  // предполагаемая макс скорость м/с (для wheelDiameter=0.068м)
+            velocity = (spdPct / 100f * vMax) * (if (dir != 0) dir.toFloat() else 1f)
         }
 
         currentSpeedMs = abs(velocity)

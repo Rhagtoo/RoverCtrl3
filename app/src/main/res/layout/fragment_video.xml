@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  fragment_video.xml v3.0 — полоски турели как на control tab:
+  PAN горизонтальная слева (замена джойстика), TILT вертикальная справа
+-->
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -18,20 +22,6 @@
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_marginTop="24dp" />
 
-    <!-- Fullscreen XIAO view (shown when swapped) -->
-    <ImageView
-        android:id="@+id/iv_xiao_main"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:scaleType="fitCenter"
-        android:visibility="gone"
-        android:contentDescription="XIAO camera fullscreen"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/toolbar_video"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginTop="24dp" />
-
     <!-- Overlay трекинга для камеры телефона -->
     <org.rhanet.roverctrl.ui.video.TrackingOverlayView
         android:id="@+id/overlay"
@@ -42,129 +32,71 @@
         app:layout_constraintStart_toStartOf="@id/preview_view"
         app:layout_constraintEnd_toEndOf="@id/preview_view" />
 
-    <!-- Overlay трекинга для камеры XIAO (показывается при swapped) -->
-    <org.rhanet.roverctrl.ui.video.TrackingOverlayView
-        android:id="@+id/overlay_xiao"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:visibility="gone"
-
-        app:layout_constraintTop_toTopOf="@id/iv_xiao_main"
-        app:layout_constraintBottom_toBottomOf="@id/iv_xiao_main"
-        app:layout_constraintStart_toStartOf="@id/iv_xiao_main"
-        app:layout_constraintEnd_toEndOf="@id/iv_xiao_main" />
-
-    <!-- PiP: MJPEG турели -->
-    <FrameLayout
-        android:id="@+id/pip_container_video"
-        android:layout_width="240dp"
-        android:layout_height="180dp"
-        android:background="#33FFFFFF"
-        android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/toolbar_video"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_margin="8dp">
-
-        <ImageView
-            android:id="@+id/iv_turret_pip_video"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:scaleType="centerCrop"
-            android:contentDescription="Turret camera" />
-
-        <TextView
-            android:id="@+id/tv_turret_fps_video"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="--"
-            android:textColor="#00E676"
-            android:textSize="10sp"
-            android:textStyle="bold"
-            android:padding="2dp"
-            android:background="#80000000"
-            android:layout_gravity="top|end" />
-
-        <TextView
-            android:id="@+id/tv_pip_source_label"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="TURRET"
-            android:textColor="#FFAB00"
-            android:textSize="9sp"
-            android:textStyle="bold"
-            android:padding="2dp"
-            android:background="#80000000"
-            android:layout_gravity="top|start" />
-
-        <TextView
-            android:id="@+id/tv_pip_swap_hint"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="⇄ TAP"
-            android:textColor="#CCFFFFFF"
-            android:textSize="10sp"
-            android:textStyle="bold"
-            android:padding="3dp"
-            android:background="#60000000"
-            android:layout_gravity="bottom|center_horizontal" />
-
-        <View android:id="@+id/pip_crosshair_v"
-            android:layout_width="1dp" android:layout_height="16dp"
-            android:background="#80FF5252" android:layout_gravity="center" />
-        <View android:id="@+id/pip_crosshair_h"
-            android:layout_width="16dp" android:layout_height="1dp"
-            android:background="#80FF5252" android:layout_gravity="center" />
-    </FrameLayout>
-
-    <!-- Overlay: Drive джойстик (Manual) -->
-    <org.rhanet.roverctrl.ui.control.JoystickView
-        android:id="@+id/joystick_drive_video"
-        android:layout_width="120dp"
-        android:layout_height="120dp"
-        android:alpha="0.45"
+    <!-- ═══ Overlay: полоска PAN турели (слева, заменяет джойстик) ═══ -->
+    <LinearLayout
+        android:id="@+id/turret_pan_block"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:alpha="0.85"
         android:visibility="gone"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintBottom_toTopOf="@id/toolbar_video"
-        android:layout_marginStart="24dp"
-        android:layout_marginBottom="24dp" />
+        android:layout_marginStart="20dp"
+        android:layout_marginBottom="16dp">
 
-    <TextView
-        android:id="@+id/tv_drive_label_video"
+        <TextView
+            android:id="@+id/tv_pan_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="◄ PAN ►"
+            android:textColor="#55FFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:paddingBottom="4dp" />
+
+        <org.rhanet.roverctrl.ui.control.SliderView
+            android:id="@+id/slider_turret_pan"
+            android:layout_width="140dp"
+            android:layout_height="48dp"
+            android:alpha="0.85" />
+
+    </LinearLayout>
+
+    <!-- ═══ Overlay: полоска TILT турели (справа) ═══ -->
+    <LinearLayout
+        android:id="@+id/turret_tilt_block"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="DRIVE"
-        android:textColor="#80FFFFFF"
-        android:textSize="10sp"
-        android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/joystick_drive_video"
-        app:layout_constraintStart_toStartOf="@id/joystick_drive_video"
-        app:layout_constraintEnd_toEndOf="@id/joystick_drive_video" />
-
-    <!-- Overlay: Camera pan/tilt джойстик (Manual) -->
-    <org.rhanet.roverctrl.ui.control.JoystickView
-        android:id="@+id/joystick_cam_video"
-        android:layout_width="120dp"
-        android:layout_height="120dp"
-        android:alpha="0.45"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:alpha="0.85"
         android:visibility="gone"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintBottom_toTopOf="@id/toolbar_video"
-        android:layout_marginEnd="24dp"
-        android:layout_marginBottom="24dp" />
+        android:layout_marginEnd="20dp"
+        android:layout_marginBottom="16dp">
 
-    <TextView
-        android:id="@+id/tv_cam_label_video"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="CAM"
-        android:textColor="#80FFFFFF"
-        android:textSize="10sp"
-        android:visibility="gone"
-        app:layout_constraintTop_toBottomOf="@id/joystick_cam_video"
-        app:layout_constraintStart_toStartOf="@id/joystick_cam_video"
-        app:layout_constraintEnd_toEndOf="@id/joystick_cam_video" />
+        <TextView
+            android:id="@+id/tv_tilt_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="▲ TILT ▼"
+            android:textColor="#55FFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:paddingBottom="4dp" />
 
-    <!-- Лазер (Manual) -->
+        <org.rhanet.roverctrl.ui.control.SliderView
+            android:id="@+id/slider_turret_tilt"
+            android:layout_width="48dp"
+            android:layout_height="140dp"
+            android:alpha="0.85" />
+
+    </LinearLayout>
+
+    <!-- Лазер (Manual) — по центру между полосками -->
     <ToggleButton
         android:id="@+id/btn_laser_video"
         android:layout_width="48dp"
@@ -175,12 +107,12 @@
         android:background="#60333333"
         android:alpha="0.7"
         android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/joystick_cam_video"
-        app:layout_constraintEnd_toEndOf="@id/joystick_cam_video"
-        app:layout_constraintStart_toStartOf="@id/joystick_cam_video"
-        android:layout_marginBottom="8dp" />
+        app:layout_constraintBottom_toTopOf="@id/toolbar_video"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginBottom="12dp" />
 
-    <!-- ═══ TOP-LEFT HUD: статус + источник + латенси ═══ -->
+    <!-- ═══ TOP-LEFT HUD: статус + латенси ═══ -->
     <LinearLayout
         android:id="@+id/video_hud_left"
         android:layout_width="wrap_content"
@@ -203,18 +135,7 @@
             android:textSize="13sp"
             android:textStyle="bold" />
 
-        <!-- Источник (XIAO / PHONE) -->
-        <TextView
-            android:id="@+id/tv_main_source_label"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="📷 PHONE"
-            android:textColor="#80CBC4"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:visibility="gone" />
-
-
+        <!-- Латенси -->
         <TextView
             android:id="@+id/tv_latency"
             android:layout_width="wrap_content"
@@ -223,7 +144,6 @@
             android:textColor="#FF9800"
             android:textSize="11sp"
             android:visibility="visible" />
-
     </LinearLayout>
 
     <!-- TOP-RIGHT: FPS камеры -->
@@ -273,28 +193,6 @@
             android:layout_width="0dp"
             android:layout_height="1dp"
             android:layout_weight="1" />
-
-        <ToggleButton
-            android:id="@+id/btn_swap_video"
-            android:layout_width="60dp"
-            android:layout_height="32dp"
-            android:textOn="XIAO"
-            android:textOff="SWAP"
-            android:textColor="#FFFFFF"
-            android:textSize="10sp"
-            android:background="#6200EA"
-            android:layout_marginEnd="6dp" />
-
-        <ToggleButton
-            android:id="@+id/btn_pip_video"
-            android:layout_width="52dp"
-            android:layout_height="32dp"
-            android:textOn="PiP"
-            android:textOff="PiP"
-            android:textColor="#FFFFFF"
-            android:textSize="10sp"
-            android:background="#FF8F00"
-            android:layout_marginEnd="6dp" />
 
         <Button
             android:id="@+id/btn_calibrate"

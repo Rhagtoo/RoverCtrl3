@@ -83,8 +83,7 @@ const int SERVO_RIGHT = 57;   // было 62  → теперь (123+57)/2=90°
 #define HEARTBEAT_MS 100
 
 int lastSpd = 0, lastStr = 0, lastFwd = 0, lastLaser = 0;
-int lastTurp = 90, lastTilt = 90;
-bool lastBrake = false;  // v1.6: турель
+int lastTurp = 90, lastTilt = 90;  // v1.6: турель
 unsigned long lastUdpRxTime     = 0;
 unsigned long lastHeartbeatSent = 0;
 
@@ -135,21 +134,17 @@ struct NanoTelem {
 // Одна транзакция: отправляем команду, одновременно читаем ответ Nano.
 // Ответ содержит телеметрию от ПРЕДЫДУЩЕЙ команды (Nano заполняет spi_rsp
 // после обработки очередного фрейма). Задержка в 1 фрейм (128 мкс) — незаметна.
-bool spiExchange(int pwm_l, int pwm_r, int servo, bool laser, bool forward, bool enable,
-                 bool handbrake = false,
+bool spiExchange(int pwm_l, int pwm_r, int servo, bool laser, bool dir_l, bool dir_r, bool enable,
                  int turret_pan = 90, int turret_tilt = 90) {
   CmdFrame cmd;
   cmd.marker      = 0xA5;
   cmd.pwm_left    = (uint8_t)constrain(abs(pwm_l), 0, 255);
   cmd.pwm_right   = (uint8_t)constrain(abs(pwm_r), 0, 255);
   cmd.servo_angle = (uint8_t)constrain(servo, 0, 180);
-  
-  // bit0=laser, bit1=forward, bit3=enable, bit4=handbrake
-  cmd.flags       = (laser     ? 0x01 : 0x00)
-                  | (forward   ? 0x02 : 0x00)
-                  | (enable    ? 0x08 : 0x00)
-                  | (handbrake ? 0x10 : 0x00);
-                  
+  cmd.flags       = (laser   ? 0x01 : 0x00)
+                  | (dir_l   ? 0x02 : 0x00)
+                  | (dir_r   ? 0x04 : 0x00)
+                  | (enable  ? 0x08 : 0x00);
   cmd.turret_pan  = (uint8_t)constrain(turret_pan,  0, 180);
   cmd.turret_tilt = (uint8_t)constrain(turret_tilt, 0, 180);
   cmd.crc   = crc8((uint8_t*)&cmd, 7);
@@ -279,9 +274,7 @@ void loop() {
     // v1.6: парсинг турели
     if (char* p = strstr(incomingPacket, "TURP:")) turp = atoi(p + 5);
     if (char* p = strstr(incomingPacket, "TILT:")) tilt = atoi(p + 5);
-	// NEW: ручник
-	bool brake = false;
-	if (char* p = strstr(incomingPacket, "BRAKE:")) brake = (atoi(p + 6) != 0);
+
     str   = constrain(str, -100, 100);
     laser = (laser != 0) ? 1 : 0;
     turp  = constrain(turp, 0, 180);
@@ -293,15 +286,14 @@ void loop() {
                      spd, str, fwd, laser, gear, turp, tilt);
     }
 
-	bool dir_forward = (spd >= 0);
-	int pwm_val = map(constrain(abs(spd), 0, 100), 0, 100, 0, 255);
-	int servoAngle = map(str, -100, 100, SERVO_RIGHT, SERVO_LEFT);
+    bool dir_forward = (spd >= 0);
+    int pwm_val = map(constrain(abs(spd), 0, 100), 0, 100, 0, 255);
+    int servoAngle = map(str, -100, 100, SERVO_RIGHT, SERVO_LEFT);
 
-	spiExchange(pwm_val, pwm_val, servoAngle, laser, dir_forward, true, brake, turp, tilt);
+    spiExchange(pwm_val, pwm_val, servoAngle, laser, dir_forward, dir_forward, true, turp, tilt);
 
-	lastSpd = spd; lastStr = str; lastFwd = fwd; lastLaser = laser;
-	lastTurp = turp; lastTilt = tilt;
-	lastBrake = brake;
+    lastSpd = spd; lastStr = str; lastFwd = fwd; lastLaser = laser;
+    lastTurp = turp; lastTilt = tilt;
     lastUdpRxTime = millis();
     lastHeartbeatSent = lastUdpRxTime;
 
@@ -347,7 +339,7 @@ void loop() {
     bool dir_fwd = (lastSpd >= 0);
     int servoAngle = map(lastStr, -100, 100, SERVO_RIGHT, SERVO_LEFT);
 
-    bool ok = spiExchange(pwm_val, pwm_val, servoAngle, lastLaser, dir_fwd, true, lastBrake, lastTurp, lastTilt);
+    bool ok = spiExchange(pwm_val, pwm_val, servoAngle, lastLaser, dir_fwd, dir_fwd, true, lastTurp, lastTilt);
     lastHeartbeatSent = nowHb;
     hbCount++;
 

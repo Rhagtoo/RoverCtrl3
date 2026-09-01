@@ -53,6 +53,16 @@ class CommandSender {
         xiaoAddr = null
     }
 
+    fun send(spd: Int, str: Int, fwd: Int, laser: Boolean, pan: Int, tilt: Int, gear: Int = 2) {
+        sendRover(spd, str, fwd, laser, pan, tilt, gear)
+        // v10.0: Xiao сгорела — turret pan/tilt теперь в rover-команде
+        // sendXiao выключен
+    }
+
+    fun sendRover(spd: Int, str: Int, fwd: Int, laser: Boolean,
+                  turp: Int = 90, tilt: Int = 90, gear: Int = 2) {
+        val laserInt = if (laser) 1 else 0
+        val msg = "SPD:$spd;STR:$str;FWD:$fwd;LASER:$laserInt;GEAR:$gear;TURP:$turp;TILT:$tilt\n"
     fun send(spd: Int, str: Int, fwd: Int, laser: Boolean, pan: Int, tilt: Int, gear: Int = 2, brake: Boolean = false) {
     sendRover(spd, str, fwd, laser, gear, brake)
     sendXiao(pan, tilt)
@@ -70,19 +80,11 @@ class CommandSender {
         }
     }
 
+    // v10.0: Xiao сгорела — sendXiao больше не используется.
+    // PAN/TILT теперь идут в sendRover как TURP/TILT для лазерной турели на Nano.
+    @Deprecated("XIAO dead — use sendRover with turp/tilt params", ReplaceWith("sendRover(0,0,0,false,turp,tilt)"))
     fun sendXiao(pan: Int, tilt: Int) {
-        Log.d(TAG, "sendXiao: pan=$pan, tilt=$tilt")
-        val panScaled = (pan * 90 / 100).coerceIn(-90, 90)
-        val tiltScaled = (tilt * 90 / 100).coerceIn(-90, 90)
-        Log.d(TAG, "sendXiao scaled: panScaled=$panScaled, tiltScaled=$tiltScaled")
-        val msg = "PAN:$panScaled;TILT:$tiltScaled\n"
-        scope.launch {
-            val addr = xiaoAddr
-            if (addr != null) {
-                Log.d(TAG, "Sending to $addr:$xiaoPort: $msg")
-                sendRaw(msg.toByteArray(), addr, xiaoPort)
-            }
-        }
+        // no-op: Xiao сгорела, туррет теперь на Nano через SPI
     }
 
     /** VCAL — direct virtual tilt angle set (calibration) */
