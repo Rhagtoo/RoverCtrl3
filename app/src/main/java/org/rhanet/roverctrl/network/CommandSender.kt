@@ -53,32 +53,22 @@ class CommandSender {
         xiaoAddr = null
     }
 
-    fun send(spd: Int, str: Int, fwd: Int, laser: Boolean, pan: Int, tilt: Int, gear: Int = 2) {
-        sendRover(spd, str, fwd, laser, pan, tilt, gear)
-        // v10.0: Xiao сгорела — turret pan/tilt теперь в rover-команде
-        // sendXiao выключен
-    }
-
-    fun sendRover(spd: Int, str: Int, fwd: Int, laser: Boolean,
-                  turp: Int = 90, tilt: Int = 90, gear: Int = 2) {
-        val laserInt = if (laser) 1 else 0
-        val msg = "SPD:$spd;STR:$str;FWD:$fwd;LASER:$laserInt;GEAR:$gear;TURP:$turp;TILT:$tilt\n"
     fun send(spd: Int, str: Int, fwd: Int, laser: Boolean, pan: Int, tilt: Int, gear: Int = 2, brake: Boolean = false) {
     sendRover(spd, str, fwd, laser, gear, brake)
     sendXiao(pan, tilt)
-    }
+}
 
-    fun sendRover(spd: Int, str: Int, fwd: Int, laser: Boolean, gear: Int = 2, brake: Boolean = false) {
+fun sendRover(spd: Int, str: Int, fwd: Int, laser: Boolean, gear: Int = 2, brake: Boolean = false) {
     val laserInt = if (laser) 1 else 0
     val brakeInt = if (brake) 1 else 0
     val msg = "SPD:$spd;STR:$str;FWD:$fwd;LASER:$laserInt;GEAR:$gear;BRAKE:$brakeInt\n"
-        scope.launch {
-            val addr = roverAddr
-            if (addr != null) {
-                sendRaw(msg.toByteArray(), addr, roverPort)
-            }
+    scope.launch {
+        val addr = roverAddr
+        if (addr != null) {
+            sendRaw(msg.toByteArray(), addr, roverPort)
         }
     }
+}
 
     // v10.0: Xiao сгорела — sendXiao больше не используется.
     // PAN/TILT теперь идут в sendRover как TURP/TILT для лазерной турели на Nano.
