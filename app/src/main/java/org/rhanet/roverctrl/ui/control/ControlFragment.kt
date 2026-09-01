@@ -48,6 +48,7 @@ class ControlFragment : Fragment() {
     private lateinit var tvDist:        TextView
     private lateinit var tvSonarStop:   TextView
     private lateinit var tvOdom:        TextView
+    private lateinit var tvDist:        TextView    // v1.3: HC-SR04
     private lateinit var tvGyroDebug:   TextView
 
     private lateinit var pipContainer: FrameLayout
@@ -84,6 +85,7 @@ class ControlFragment : Fragment() {
         tvDist        = view.findViewById(R.id.tv_dist)
         tvSonarStop   = view.findViewById(R.id.tv_sonar_stop)
         tvOdom        = view.findViewById(R.id.tv_odom)
+        tvDist        = view.findViewById(R.id.tv_dist)   // v1.3: HC-SR04
         tvGyroDebug   = view.findViewById(R.id.tv_gyro_debug)
         pipContainer  = view.findViewById(R.id.pip_container)
         ivTurretPip   = view.findViewById(R.id.iv_turret_pip)

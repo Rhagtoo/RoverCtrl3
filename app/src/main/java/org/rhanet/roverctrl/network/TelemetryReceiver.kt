@@ -136,6 +136,7 @@ class TelemetryReceiver {
         dir   = json.optInt("dir", 0),                 // v2.8: 1=вперёд, -1=назад
         dist  = json.optInt("dist", 0),                 // v2.8: сонар, см
         sonarStop = json.optInt("sonarStop", 0) != 0    // v2.8: экстренный тормоз
+        
     )
 
     fun stop() {

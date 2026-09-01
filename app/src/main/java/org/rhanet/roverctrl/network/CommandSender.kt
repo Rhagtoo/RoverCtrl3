@@ -63,6 +63,15 @@ class CommandSender {
                   turp: Int = 90, tilt: Int = 90, gear: Int = 2) {
         val laserInt = if (laser) 1 else 0
         val msg = "SPD:$spd;STR:$str;FWD:$fwd;LASER:$laserInt;GEAR:$gear;TURP:$turp;TILT:$tilt\n"
+    fun send(spd: Int, str: Int, fwd: Int, laser: Boolean, pan: Int, tilt: Int, gear: Int = 2, brake: Boolean = false) {
+    sendRover(spd, str, fwd, laser, gear, brake)
+    sendXiao(pan, tilt)
+    }
+
+    fun sendRover(spd: Int, str: Int, fwd: Int, laser: Boolean, gear: Int = 2, brake: Boolean = false) {
+    val laserInt = if (laser) 1 else 0
+    val brakeInt = if (brake) 1 else 0
+    val msg = "SPD:$spd;STR:$str;FWD:$fwd;LASER:$laserInt;GEAR:$gear;BRAKE:$brakeInt\n"
         scope.launch {
             val addr = roverAddr
             if (addr != null) {
