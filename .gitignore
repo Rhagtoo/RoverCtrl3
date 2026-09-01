@@ -33,3 +33,6 @@ google-services.json
 /rover/
 config.yaml
 requirements.txt
+
+# Windows NTFS Alternate Data Stream artifacts
+*:Zone.Identifier

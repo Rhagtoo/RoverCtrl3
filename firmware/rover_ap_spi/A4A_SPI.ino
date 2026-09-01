@@ -1,12 +1,14 @@
 // ============================================================
 //  A4A_SPI.ino — ESP32-S3: WiFi AP + UDP приём + SPI master → Nano
 //
+//  v1.7: Синхронизация с Nano v11.1 (handbrake drift).
+//        - CmdFrame.flags: bit1=forward (общее направление), bit4=handbrake
+//        - Исправлен стартовый spiExchange (убран ложный handbrake=true)
+//        - ACK теперь содержит brake для отладки
 //  v1.6: +TURP/TILT в UDP (лазерная турель). rsvd1/rsvd2 SPI фрейма
 //        переиспользованы под turret_pan (0-180°) и turret_tilt (0-180°).
 //        Убран сонар из телеметрии (distance_cm, sonarStop).
 //  v1.5: +dir в телеметрии (направление для одометрии).
-//  v1.4: sonarStop в телеметрии (bit4 статуса Nano). Телеметрия 100 мс (было 200).
-//  v1.3: Добавлена поддержка HC-SR04: distance_cm из SPI-ответа → телеметрия.
 //  v1.1: Одна SPI-транзакция на обмен (вместо двух). Ответ Nano
 //        всегда на 1 фрейм позади (телеметрия от предыдущей команды) —
 //        на 1 МГц это 128 мкс задержки, незаметно.
@@ -69,21 +71,15 @@ uint16_t  lastSenderPort = 0;
 bool      haveSender = false;
 
 // Калибровка руля — симметрично относительно 90°
-// Центр (str=0) = (LEFT+RIGHT)/2 должен быть 90°
-const int SERVO_LEFT  = 123;  // было 128 → центр был (128+62)/2=95°
-const int SERVO_RIGHT = 57;   // было 62  → теперь (123+57)/2=90°
+const int SERVO_LEFT  = 123;
+const int SERVO_RIGHT = 57;
 
 // ====== Heartbeat ======
-// Heartbeat теперь НЕ зависит от непрерывности UDP.
-// Как только получена первая команда — heartbeat шлёт последнюю команду
-// каждые HEARTBEAT_MS, пока ESP жив. Если ESP умирает/выключается —
-// watchdog на Nano (500 мс) сам заглушит моторы.
-// Это надёжнее, чем таймаут UDP — Wi-Fi может икать, телефон может
-// на секунду замолчать, а ровер должен ехать плавно.
 #define HEARTBEAT_MS 100
 
 int lastSpd = 0, lastStr = 0, lastFwd = 0, lastLaser = 0;
-int lastTurp = 90, lastTilt = 90;  // v1.6: турель
+int lastTurp = 90, lastTilt = 90;
+bool lastBrake = false;
 unsigned long lastUdpRxTime     = 0;
 unsigned long lastHeartbeatSent = 0;
 
@@ -94,10 +90,10 @@ struct CmdFrame {
   uint8_t pwm_left;
   uint8_t pwm_right;
   uint8_t servo_angle;
-  uint8_t flags;       // bit0=laser, bit1=dir_L, bit2=dir_R, bit3=enable
+  uint8_t flags;       // bit0=laser, bit1=forward, bit2=rsvd, bit3=enable, bit4=handbrake
   uint8_t turret_pan;  // v1.6: лазерный туррет pan (0-180°)
   uint8_t turret_tilt; // v1.6: лазерный туррет tilt (0-180°)
-  uint8_t crc;         // XOR bytes 0-6
+  uint8_t crc;         // CRC-8 poly 0x07
 };
 
 struct RspFrame {
@@ -105,7 +101,7 @@ struct RspFrame {
   uint8_t pwm_l_echo;
   uint8_t pwm_r_echo;
   uint8_t servo_actual;
-  uint8_t status;      // bit0=laser, bit1=wd_ok, bit2=fault
+  uint8_t status;      // bit0=laser, bit1=wd_ok, bit2=crc_error, bit3=fault
   uint8_t bat_raw;
   uint8_t rsvd;        // v1.6: бывший distance_cm (сонар удалён)
   uint8_t crc;
@@ -134,20 +130,24 @@ struct NanoTelem {
 // Одна транзакция: отправляем команду, одновременно читаем ответ Nano.
 // Ответ содержит телеметрию от ПРЕДЫДУЩЕЙ команды (Nano заполняет spi_rsp
 // после обработки очередного фрейма). Задержка в 1 фрейм (128 мкс) — незаметна.
-bool spiExchange(int pwm_l, int pwm_r, int servo, bool laser, bool dir_l, bool dir_r, bool enable,
+bool spiExchange(int pwm_l, int pwm_r, int servo, bool laser, bool forward, bool enable,
+                 bool handbrake = false,
                  int turret_pan = 90, int turret_tilt = 90) {
   CmdFrame cmd;
   cmd.marker      = 0xA5;
   cmd.pwm_left    = (uint8_t)constrain(abs(pwm_l), 0, 255);
   cmd.pwm_right   = (uint8_t)constrain(abs(pwm_r), 0, 255);
   cmd.servo_angle = (uint8_t)constrain(servo, 0, 180);
-  cmd.flags       = (laser   ? 0x01 : 0x00)
-                  | (dir_l   ? 0x02 : 0x00)
-                  | (dir_r   ? 0x04 : 0x00)
-                  | (enable  ? 0x08 : 0x00);
+
+  // bit0=laser, bit1=forward, bit3=enable, bit4=handbrake
+  cmd.flags       = (laser     ? 0x01 : 0x00)
+                  | (forward   ? 0x02 : 0x00)
+                  | (enable    ? 0x08 : 0x00)
+                  | (handbrake ? 0x10 : 0x00);
+
   cmd.turret_pan  = (uint8_t)constrain(turret_pan,  0, 180);
   cmd.turret_tilt = (uint8_t)constrain(turret_tilt, 0, 180);
-  cmd.crc   = crc8((uint8_t*)&cmd, 7);
+  cmd.crc         = crc8((uint8_t*)&cmd, 7);
 
   RspFrame rsp;
   uint8_t *cmdPtr = (uint8_t*)&cmd;
@@ -163,7 +163,7 @@ bool spiExchange(int pwm_l, int pwm_r, int servo, bool laser, bool dir_l, bool d
   digitalWrite(SPI_SS, HIGH);
   SPI.endTransaction();
 
-  // Валидация ответа (v1.2: диагностика ошибок)
+  // Валидация ответа
   static int spiErrCount = 0;
   if (rsp.marker != 0xB5) {
     spiErrCount++;
@@ -245,8 +245,8 @@ void setup() {
   udp.begin(localUdpPort);
   Serial.printf("Listening UDP on %s:%u\n", WiFi.softAPIP().toString().c_str(), localUdpPort);
 
-  // Первый обмен: инициализируем Nano, телеметрия будет с нулями (нормально)
-  spiExchange(0, 0, 90, false, true, true, true);
+  // Первый обмен: инициализируем Nano (handbrake=false, турель по центру)
+  spiExchange(0, 0, 90, false, true, true, false, 90, 90);
 }
 
 // ================== LOOP ==================
@@ -264,7 +264,7 @@ void loop() {
     if (len > 0) incomingPacket[len] = 0;
 
     int spd = 0, str = 0, fwd = 0, laser = 0, gear = 0;
-    int turp = 90, tilt = 90;  // v1.6: лазерная турель
+    int turp = 90, tilt = 90;
 
     // v1.2: RAW пакет ДО парсинга — видим что реально шлёт телефон
     Serial.printf("[PKT RAW] '%s' (%d bytes)\n", incomingPacket, len);
@@ -275,39 +275,44 @@ void loop() {
     if (char* p = strstr(incomingPacket, "TURP:")) turp = atoi(p + 5);
     if (char* p = strstr(incomingPacket, "TILT:")) tilt = atoi(p + 5);
 
+    // v1.7: парсинг ручника
+    bool brake = false;
+    if (char* p = strstr(incomingPacket, "BRAKE:")) brake = (atoi(p + 6) != 0);
+
     str   = constrain(str, -100, 100);
     laser = (laser != 0) ? 1 : 0;
     turp  = constrain(turp, 0, 180);
     tilt  = constrain(tilt, 0, 180);
 
     if (DBG_RX_SERIAL) {
-      Serial.printf("[RX %s:%u] %s\n  parsed: SPD=%d STR=%d FWD=%d LASER=%d GEAR=%d TURP=%d TILT=%d\n",
+      Serial.printf("[RX %s:%u] %s\n  parsed: SPD=%d STR=%d FWD=%d LASER=%d GEAR=%d TURP=%d TILT=%d BRAKE=%d\n",
                      lastSenderIP.toString().c_str(), lastSenderPort, incomingPacket,
-                     spd, str, fwd, laser, gear, turp, tilt);
+                     spd, str, fwd, laser, gear, turp, tilt, brake);
     }
 
     bool dir_forward = (spd >= 0);
     int pwm_val = map(constrain(abs(spd), 0, 100), 0, 100, 0, 255);
     int servoAngle = map(str, -100, 100, SERVO_RIGHT, SERVO_LEFT);
 
-    spiExchange(pwm_val, pwm_val, servoAngle, laser, dir_forward, dir_forward, true, turp, tilt);
+    spiExchange(pwm_val, pwm_val, servoAngle, laser, dir_forward, true, brake, turp, tilt);
 
     lastSpd = spd; lastStr = str; lastFwd = fwd; lastLaser = laser;
     lastTurp = turp; lastTilt = tilt;
+    lastBrake = brake;
     lastUdpRxTime = millis();
     lastHeartbeatSent = lastUdpRxTime;
 
-    // ACK + телеметрия (v1.6: убран сонар)
+    // ACK + телеметрия (v1.7: +brake в JSON)
     int bat_pct = (nanoTelem.bat_raw > 0) ? map(nanoTelem.bat_raw, 0, 128, 0, 100) : 100;
     int dir = (fwd > 0 ? 1 : (fwd < 0 ? -1 : 0));
     char ackBuf[200];
     snprintf(ackBuf, sizeof(ackBuf),
       "{\"ack\":1,\"cmd\":1,\"spd\":%d,\"str\":%d,\"fwd\":%d,"
       "\"dir\":%d,\"bat\":%d,\"rpmL\":%.1f,\"rpmR\":%.1f,"
-      "\"sv\":%d,\"st\":%d}",
+      "\"sv\":%d,\"st\":%d,\"brake\":%d}",
       abs(spd), str, fwd, dir,
       bat_pct, rpmL, rpmR,
-      nanoTelem.servo_actual, nanoTelem.status);
+      nanoTelem.servo_actual, nanoTelem.status, brake ? 1 : 0);
     sendUdpReply(ackBuf);
   }
 
@@ -339,19 +344,18 @@ void loop() {
     bool dir_fwd = (lastSpd >= 0);
     int servoAngle = map(lastStr, -100, 100, SERVO_RIGHT, SERVO_LEFT);
 
-    bool ok = spiExchange(pwm_val, pwm_val, servoAngle, lastLaser, dir_fwd, dir_fwd, true, lastTurp, lastTilt);
+    bool ok = spiExchange(pwm_val, pwm_val, servoAngle, lastLaser, dir_fwd, true, lastBrake, lastTurp, lastTilt);
     lastHeartbeatSent = nowHb;
     hbCount++;
 
-    // v1.2: каждые 10 heartbeat'ов — диагностика
     if (hbCount % 10 == 0) {
-      Serial.printf("[HB #%lu] spd=%d pwm=%d dir=%s sv=%d spi_ok=%d nano_st=0x%02X\n",
+      Serial.printf("[HB #%lu] spd=%d pwm=%d dir=%s sv=%d brake=%d spi_ok=%d nano_st=0x%02X\n",
                     hbCount, lastSpd, pwm_val, dir_fwd ? "FWD" : "REV",
-                    servoAngle, ok, nanoTelem.status);
+                    servoAngle, lastBrake ? 1 : 0, ok, nanoTelem.status);
     }
   }
 
-  // v1.2: безусловная диагностика каждые 2 сек — следим за переменными heartbeat
+  // v1.2: безусловная диагностика каждые 2 сек
   static unsigned long lastHBDiag = 0;
   if (millis() - lastHBDiag >= 2000) {
     lastHBDiag = millis();
@@ -366,7 +370,7 @@ void loop() {
     char telBuf[200];
     int bat_pct = (nanoTelem.bat_raw > 0) ? map(nanoTelem.bat_raw, 0, 128, 0, 100) : 100;
 
-    int dir = (lastSpd > 0 ? 1 : (lastSpd < 0 ? -1 : 0));  // v1.5: направление для одометрии
+    int dir = (lastSpd > 0 ? 1 : (lastSpd < 0 ? -1 : 0));
     if (abs(rpmL) > 0.01f || abs(rpmR) > 0.01f) {
       snprintf(telBuf, sizeof(telBuf),
         "{\"bat\":%d,\"yaw\":0.0,\"spd\":%d,\"str\":%d,"
@@ -384,9 +388,9 @@ void loop() {
 
     static unsigned long telemCount = 0;
     telemCount++;
-    if (telemCount % 10 == 0) {  // каждые 10-й пакет (~1 сек)
-      Serial.printf("[TELEM #%lu] bat=%d spd=%d tur=%d,%d\n",
-                    telemCount, bat_pct, abs(lastSpd), lastTurp, lastTilt);
+    if (telemCount % 10 == 0) {
+      Serial.printf("[TELEM #%lu] bat=%d spd=%d tur=%d,%d brake=%d\n",
+                    telemCount, bat_pct, abs(lastSpd), lastTurp, lastTilt, lastBrake ? 1 : 0);
     }
 
     udp.beginPacket(lastSenderIP, TELEM_PORT);
