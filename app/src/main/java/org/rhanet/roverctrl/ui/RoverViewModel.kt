@@ -92,6 +92,7 @@ class RoverViewModel : ViewModel() {
     @Volatile var panCmd  = 0
     @Volatile var tiltCmd = 0
     @Volatile var laserOn = false
+    @Volatile var brakeOn = false
 
     private val odometry = OdometryTracker()
     val pidPan  = PidController(kp = 120f, ki = 0.5f, kd = 8f, outMax = 100f)
@@ -131,7 +132,7 @@ class RoverViewModel : ViewModel() {
 
         cmdTickJob = viewModelScope.launch {
             while (true) {
-                sender.send(spd, str, fwd, laserOn, panCmd, tiltCmd, _gear.value)
+                sender.send(spd, str, fwd, laserOn, panCmd, tiltCmd, _gear.value, brakeOn)
                 delay(CMD_TICK_MS)
             }
         }
