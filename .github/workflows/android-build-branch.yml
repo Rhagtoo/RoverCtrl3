@@ -43,21 +43,28 @@ jobs:
         restore-keys: |
           gradle-${{ runner.os }}-
     
-    - name: Set up Android SDK
-      uses: android-actions/setup-android@v3
-      with:
-        cmdline-tools-version: 'latest'
-        accept-licenses: 'true'
-      timeout-minutes: 10
-
     - name: Install Android SDK packages
       run: |
-        sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-      timeout-minutes: 10
+        # android-actions/setup-android@v3 сломан: экшен жёстко вызывает
+        # `sdkmanager tools`, а пакет 'tools' удалён из новых cmdline-tools
+        # (Warning: Failed to find package 'tools' → exit 1).
+        # SDK уже есть в ubuntu-latest — работаем с ним напрямую.
+        SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+        echo "SDK_ROOT=$SDK_ROOT"
+        SDKM="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+        [ -x "$SDKM" ] || SDKM=$(ls -d "$SDK_ROOT"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -1)
+        echo "sdkmanager: $SDKM"
+        yes | "$SDKM" --licenses > /dev/null 2>&1 || true
+        "$SDKM" --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+        echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+        echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+      timeout-minutes: 15
     
     - name: Create local.properties
+      env:
+        ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
       run: |
-        echo "sdk.dir=$ANDROID_HOME" > local.properties
+        echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
     
     - name: Accept Android SDK licenses
       run: |
