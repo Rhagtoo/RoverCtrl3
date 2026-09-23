@@ -160,6 +160,7 @@ class RoverViewModel : ViewModel() {
         cmdTickJob?.cancel(); telemJob?.cancel(); rssiJob?.cancel()
         telemRx.stop(); sender.clearHosts(); stopTurretStream()
         spd = 0; str = 0; fwd = 0; panCmd = 0; tiltCmd = 0; laserOn = false
+        brakeOn = false   // BUGFIX: ручник залипал (сбрасывался только по keyUp геймпада)
         _telem.value = TelemetryData()
         _wifiRssi.value = 0
         _connected.value = false

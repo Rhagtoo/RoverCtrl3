@@ -1,6 +1,21 @@
 // ============================================================
 //  A4A_SPI.ino — ESP32-S3: WiFi AP + UDP приём + SPI master → Nano
 //
+//  v1.11: +OBS на экране — флаг препятствия от Nano (проброшен через rsvd
+//        SPI-ответа). Сразу видно, почему не едет вперёд.
+//  v1.10: Угол руля на экране считается ЛОКАЛЬНО из lastStr (без SPI round-trip).
+//        Раньше брался nanoTelem.servo_actual — он отставал на 2 цикла команд
+//        (ответ строится в processSpiCommand до updateServoSmoothing, плюс
+//        сам SPI отдаёт ответ предыдущей команды) и обновлялся рывками.
+//        Значение то же самое: servo_actual на Nano — это лишь эхо командного
+//        угла (writeServoNow пишет servoAngle, обратной связи с сервы нет).
+//        Плюс обновление экрана поднято с 5 до 10 Гц.
+//  v1.9: +диагностика сбросов на экране. Показывает причину последнего
+//        ресета (BROWNOUT / PANIC / WDT / POWERON), счётчик загрузок в
+//        RTC-памяти (переживает сброс), аптайм и длительность прошлого запуска.
+//  v1.8: +OLED SSD1306 128x32 (I2C) — на экране угол руля + скорость.
+//        SDA=GPIO4, SCL=GPIO5, питание 3.3V, адрес 0x3C/0x3D.
+//        Обновление 5 Гц, только в loop(), не блокирует SPI/сердцебиение.
 //  v1.7: Синхронизация с Nano v11.1 (handbrake drift).
 //        - CmdFrame.flags: bit1=forward (общее направление), bit4=handbrake
 //        - Исправлен стартовый spiExchange (убран ложный handbrake=true)
@@ -26,6 +41,10 @@
 #include <Arduino.h>
 #include <ESP32Encoder.h>
 #include <SPI.h>
+#include <Wire.h>
+#include <U8g2lib.h>
+#include <esp_system.h>
+#include <esp_attr.h>
 
 // ================== DEBUG SWITCHES ==================
 static bool DBG_RX_SERIAL  = true;
@@ -39,6 +58,11 @@ static bool DBG_SPI        = true;
 #define SPI_MISO 16
 #define SPI_SCK  17
 #define SPI_SPEED 1000000   // 1 МГц
+
+// ====== OLED (SSD1306 128x32, I2C) ======
+#define OLED_SDA  4
+#define OLED_SCL  5
+U8G2_SSD1306_128X32_UNIVISION_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
 
 // ====== Encoders ======
 #define CLK_LEFT  35
@@ -83,6 +107,42 @@ bool lastBrake = false;
 unsigned long lastUdpRxTime     = 0;
 unsigned long lastHeartbeatSent = 0;
 
+// ================== ДИАГНОСТИКА СБРОСОВ ==================
+// Переменные в RTC-памяти НЕ обнуляются при сбросе MCU (в т.ч. brownout)
+// и НЕ инициализируются сами — поэтому нужен magic-маркер.
+RTC_NOINIT_ATTR uint32_t bootMagic;
+RTC_NOINIT_ATTR uint32_t bootCount;
+RTC_NOINIT_ATTR uint32_t prevRunSec;
+#define BOOT_MAGIC 0x52565433UL   // "RVT3"
+
+uint32_t    gBootCount  = 1;
+uint32_t    gPrevRunSec = 0;
+const char* gResetName  = "UNKNOWN";
+
+const char* resetReasonName(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:   return "POWERON";
+    case ESP_RST_EXT:       return "EXT PIN";
+    case ESP_RST_SW:        return "SW REBOOT";
+    case ESP_RST_PANIC:     return "PANIC";
+    case ESP_RST_INT_WDT:   return "INT WDT";
+    case ESP_RST_TASK_WDT:  return "TASK WDT";
+    case ESP_RST_WDT:       return "WDT";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT";
+    case ESP_RST_SDIO:      return "SDIO";
+    default:                return "UNKNOWN";
+  }
+}
+
+// Короткая длительность: "45s" / "12m" / "2h05"
+void fmtDur(uint32_t sec, char* out, size_t n) {
+  if (sec < 60)        snprintf(out, n, "%us",  (unsigned)sec);
+  else if (sec < 3600) snprintf(out, n, "%um",  (unsigned)(sec / 60));
+  else                 snprintf(out, n, "%uh%02u", (unsigned)(sec / 3600),
+                                 (unsigned)((sec % 3600) / 60));
+}
+
 // ================== Протокол SPI ==================
 
 struct CmdFrame {
@@ -103,7 +163,7 @@ struct RspFrame {
   uint8_t servo_actual;
   uint8_t status;      // bit0=laser, bit1=wd_ok, bit2=crc_error, bit3=fault
   uint8_t bat_raw;
-  uint8_t rsvd;        // v1.6: бывший distance_cm (сонар удалён)
+  uint8_t rsvd;        // v1.11: флаг obstacle от Nano (1 = препятствие)
   uint8_t crc;
 };
 
@@ -124,6 +184,7 @@ struct NanoTelem {
   uint8_t servo_actual;
   uint8_t status;
   uint8_t bat_raw;
+  uint8_t obstacle;    // v1.11: флаг препятствия от Nano (1 = блокирует forward)
   bool valid;
 } nanoTelem = {0};
 
@@ -187,6 +248,7 @@ bool spiExchange(int pwm_l, int pwm_r, int servo, bool laser, bool forward, bool
   nanoTelem.servo_actual = rsp.servo_actual;
   nanoTelem.status       = rsp.status;
   nanoTelem.bat_raw      = rsp.bat_raw;
+  nanoTelem.obstacle     = rsp.rsvd;   // v1.11: флаг OBS с Nano
   nanoTelem.valid        = true;
 
   if (DBG_SPI) {
@@ -212,11 +274,62 @@ void sendUdpReply(const char* payload) {
   }
 }
 
+// ================== OLED ==================
+
+// Вывод на SSD1306 128x32 (3 строки по 6x10 = 21 символ).
+// Строка 1 — рабочая: угол руля + скорость.
+// Строки 2-3 — диагностика: номер загрузки, аптайм, причина сброса,
+//                 сколько прожил прошлый запуск.
+// Вызывать ТОЛЬКО из loop()/setup() — U8g2 не реентерабелен.
+void drawOled() {
+  // Угол руля: считаем ЛОКАЛЬНО из последней команды приложения — мгновенно,
+  // без round-trip через Nano. Ровно то же значение, что Nano вернул бы
+  // в servo_actual (там просто эхо командного угла, не реальная позиция).
+  int steerAngle = map(lastStr, -100, 100, SERVO_RIGHT, SERVO_LEFT);
+  int speedPct = abs(lastSpd);
+
+  unsigned long up = millis() / 1000UL;
+  char dur[12];
+  fmtDur(gPrevRunSec, dur, sizeof(dur));
+
+  char l1[24], l2[24], l3[24];
+  snprintf(l1, sizeof(l1), "ANG%3d SPD%3d%% OBS%d",
+           steerAngle, speedPct, nanoTelem.obstacle ? 1 : 0);
+  snprintf(l2, sizeof(l2), "BOOT#%lu UP %02lu:%02lu:%02lu",
+           (unsigned long)gBootCount, up / 3600, (up / 60) % 60, up % 60);
+  snprintf(l3, sizeof(l3), "RST %-9s (%s)", gResetName, dur);
+
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tf);
+  u8g2.drawStr(0,  9, l1);
+  u8g2.drawStr(0, 20, l2);
+  u8g2.drawStr(0, 31, l3);
+  u8g2.sendBuffer();
+}
+
 // ================== SETUP ==================
 
 void setup() {
   Serial.begin(115200);
   delay(300);
+
+  // ── Причина сброса: читаем ДО всего остального ──
+  esp_reset_reason_t rr = esp_reset_reason();
+  gResetName = resetReasonName(rr);
+  if (bootMagic != BOOT_MAGIC) {   // первый запуск после подачи питания
+    bootMagic  = BOOT_MAGIC;
+    bootCount  = 1;
+    prevRunSec = 0;
+  } else {
+    bootCount++;
+  }
+  gBootCount  = bootCount;
+  gPrevRunSec = prevRunSec;
+  prevRunSec  = 0;                 // отсчёт текущего запуска заново
+
+  Serial.printf("\n=== BOOT #%lu | RST: %s (rr=%d) | прошлый запуск: %lus ===\n",
+                (unsigned long)gBootCount, gResetName, (int)rr,
+                (unsigned long)gPrevRunSec);
 
   // SPI master
   pinMode(SPI_SS, OUTPUT);
@@ -244,6 +357,21 @@ void setup() {
 
   udp.begin(localUdpPort);
   Serial.printf("Listening UDP on %s:%u\n", WiFi.softAPIP().toString().c_str(), localUdpPort);
+
+  // ── OLED SSD1306 128x32 (I2C) ──
+  Wire.begin(OLED_SDA, OLED_SCL);
+  Wire.setClock(400000);
+  int i2cFound = 0;
+  for (uint8_t a = 1; a < 127; a++) {
+    Wire.beginTransmission(a);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("I2C: найден device 0x%02X\n", a);
+      i2cFound++;
+    }
+  }
+  if (!i2cFound) Serial.println("I2C: НИЧЕГО НЕ НАЙДЕНО — проверь SDA/SCL/VCC");
+  u8g2.begin();
+  drawOled();   // сразу показываем причину сброса — не ждём loop()
 
   // Первый обмен: инициализируем Nano (handbrake=false, турель по центру)
   spiExchange(0, 0, 90, false, true, true, false, 90, 90);
@@ -396,5 +524,20 @@ void loop() {
     udp.beginPacket(lastSenderIP, TELEM_PORT);
     udp.write((uint8_t*)telBuf, strlen(telBuf));
     udp.endPacket();
+  }
+
+  // ── Аптайм в RTC-память: раз в секунду ──
+  // При следующем сбросе это значение станет длительностью «прошлого запуска».
+  static unsigned long lastRunUpd = 0;
+  if (millis() - lastRunUpd >= 1000) {
+    lastRunUpd = millis();
+    prevRunSec = millis() / 1000UL;
+  }
+
+  // ── OLED: 10 Гц, не блокирующе (512 байт @400кГц ≈ 11 мс) ──
+  static unsigned long lastOled = 0;
+  if (millis() - lastOled >= 100) {
+    lastOled = millis();
+    drawOled();
   }
 }

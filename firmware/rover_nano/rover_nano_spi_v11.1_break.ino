@@ -1,15 +1,29 @@
 /**
- * rover_nano_spi.ino v11.1 — Arduino Nano: SPI slave + дрифт через IN1/IN2
+ * rover_nano_spi.ino v11.4 — Arduino Nano: SPI slave + дрифт через IN1/IN2
  *
+ * v11.4: РУЧНИК ПЕРЕВЕДЁН С SHORT-BRAKE НА COAST.
+ *        Было: IN1=IN2=HIGH → короткое замыкание обмотки → вращающийся мотор
+ *        работает генератором, ток ограничен только сопротивлением обмотки
+ *        (6–12 А при пределе TB6612 1.2 А длительно) → драйверы горели.
+ *        Стало: IN1=IN2=LOW → выход high-Z, колесо катится свободно.
+ *        ВАЖНО: на TB6612 PWM=0 при заданном направлении = тоже SHORT-BRAKE,
+ *        так что coast делается ИМЕННО через IN-пины, а не через PWM.
+ * v11.3: FRONT_R_IN2 перенесён A4 → D7 (освобождает A4/SDA под I2C).
+ *        ENBL (STBY TB6612) убран из прошивки — STBY подключить на VCC.
+ *        enable всегда true, т.е. ENBL и так был постоянно HIGH; на старте
+ *        моторы не крутятся (OCR2B=0, IN1=IN2=LOW), так что VCC безопасен.
+ * v11.2: INPUT_PULLUP на OBSTACLE_PIN (D2 без подтяжки ловил шум → ложный
+ *        obstacle глушил ТОЛЬКО движение вперёд). Флаг obstacle пробрасывается
+ *        в rsvd SPI-ответа для отображения на экране ESP32.
  * v11.1: Один общий PWM 62.5 кГц (D3) на все моторы.
  *        Независимое управление через IN1/IN2:
  *          Задние (оба):   D4/D5
  *          Переднее левое:  A1/A2
- *          Переднее правое: A3/A4
+ *          Переднее правое: A3/D7
  *        Handbrake (bit4 flags):
- *          Руль центр (75-105°) → short-brake оба передних
- *          Руль < 75°           → short-brake только левое переднее
- *          Руль > 105°          → short-brake только правое переднее
+ *          Руль центр (75-105°) → снять тягу с обоих передних (coast)
+ *          Руль < 75°           → снять тягу с левого переднего
+ *          Руль > 105°          → снять тягу с правого переднего
  *        Задние всегда едут при газе.
  *
  * v10.0: (база) 3 сервы, лазер, удалён сонар.
@@ -38,7 +52,7 @@ struct RspFrame {
   uint8_t servo_actual;
   uint8_t status;      // bit0=laser, bit1=wd_ok, bit2=crc_error, bit3=fault
   uint8_t bat_raw;
-  uint8_t rsvd;        // всегда 0
+  uint8_t rsvd;        // v11.2: флаг obstacle (1 = препятствие, блокирует forward)
   uint8_t crc;
 };
 
@@ -49,16 +63,17 @@ struct RspFrame {
 // Задние колёса (оба)
 #define REAR_IN1      4
 #define REAR_IN2      5
-a
+
 // Переднее левое
 #define FRONT_L_IN1  A1
 #define FRONT_L_IN2  A2
 
 // Переднее правое
 #define FRONT_R_IN1  A3
-#define FRONT_R_IN2  A4
+#define FRONT_R_IN2  7      // v11.3: было A4 (SDA) — освобождаем A4/A5 под I2C
 
-#define ENBL          7
+// v11.3: ENBL (STBY TB6612) убран из прошивки — два источника на D7 недопустимы.
+//        STBY припаять на VCC.
 #define OBSTACLE_PIN  2     // KY-032 → INT0
 
 // ── Сервы ─────────────────────────────────────────────────────────────
@@ -71,7 +86,13 @@ a
 #define MOTOR_WATCHDOG_MS  500
 
 // ── Плавность ─────────────────────────────────────────────────────────
-#define SERVO_STEP_DEG     0
+// v11.5: СЕРВО-РАМПА ВКЛЮЧЕНА (было 0 — мгновенный скачок).
+//   Диагноз brownout: важен не УГОЛ, а СКОРОСТЬ движения руля. При мгновенном
+//   скачке 2× MG996R идут на полном моменте (суммарно ~5А пик) — медленный контур
+//   XL4016 + малая выходная ёмкость не успевают → просадка rail → brownout ESP32.
+//   Рампа держит ошибку малой → контроллер сервы не насыщается → ток в разы ниже.
+//   2°/10мс = 200°/с → полный ход 66° за ~330 мс. Хочется резче — ставь 3.
+#define SERVO_STEP_DEG     2
 #define SERVO_UPDATE_MS    10
 #define PWM_RAMP_STEP     32
 
@@ -190,17 +211,22 @@ void applyMotors(int gas, bool forward, bool handbrake) {
   int fr2 = forward ? LOW  : HIGH;
 
   if (handbrake) {
+    // v11.4: COAST вместо SHORT-BRAKE.
+    // Раньше IN1=IN2=HIGH замыкал обмотку: вращающийся мотор = генератор,
+    // ток ограничен только сопротивлением обмотки (6–12А против 1.2А у TB6612)
+    // → драйверы горели. Теперь просто снимаем тягу с переднего колеса:
+    // IN1=IN2=LOW → выход high-Z (coast), колесо катится свободно.
     int sa = targetServoAngle;
     if (sa < HB_CENTER_MIN) {
-      // руль влево → short brake только левое переднее
-      fl1 = HIGH; fl2 = HIGH;
+      // руль влево → снять тягу с левого переднего
+      fl1 = LOW; fl2 = LOW;
     } else if (sa > HB_CENTER_MAX) {
-      // руль вправо → short brake только правое переднее
-      fr1 = HIGH; fr2 = HIGH;
+      // руль вправо → снять тягу с правого переднего
+      fr1 = LOW; fr2 = LOW;
     } else {
-      // руль по центру → short brake оба передних
-      fl1 = HIGH; fl2 = HIGH;
-      fr1 = HIGH; fr2 = HIGH;
+      // руль по центру → снять тягу с обоих передних
+      fl1 = LOW; fl2 = LOW;
+      fr1 = LOW; fr2 = LOW;
     }
   }
 
@@ -299,7 +325,7 @@ void processSpiCommand() {
     bool handbrake = (cmd.flags & 0x10) != 0;   // bit4 = ручник
 
     if (enable) {
-      digitalWrite(ENBL, HIGH);
+      // v11.3: ENBL убран — STBY подключён на VCC (см. шапку)
 
       // Общий газ — берём максимум из двух каналов для совместимости
       int gas = max((int)cmd.pwm_l, (int)cmd.pwm_r);
@@ -322,7 +348,7 @@ void processSpiCommand() {
   rsp.servo_actual = servoAngle;
   rsp.status       = statusFlags;
   rsp.bat_raw      = 0x00;
-  rsp.rsvd         = 0;
+  rsp.rsvd         = obstacle ? 1 : 0;   // v11.2: пробрасываем OBS на ESP32/экран
   rsp.crc          = crc8((uint8_t*)&rsp, 7);
 
   uint8_t sreg2 = SREG;
@@ -353,11 +379,9 @@ void setup() {
   pinMode(FRONT_L_IN1, OUTPUT); pinMode(FRONT_L_IN2, OUTPUT);
   pinMode(FRONT_R_IN1, OUTPUT); pinMode(FRONT_R_IN2, OUTPUT);
   pinMode(PWM_COMMON, OUTPUT);
-  pinMode(ENBL, OUTPUT);
   pinMode(LASER_PIN, OUTPUT);
-  pinMode(OBSTACLE_PIN, INPUT);
+  pinMode(OBSTACLE_PIN, INPUT_PULLUP);   // v11.2: без подтяжки пин D2 ловит шум → ложный obstacle глушит ТОЛЬКО forward
 
-  digitalWrite(ENBL, HIGH);
   digitalWrite(REAR_IN1, LOW);    digitalWrite(REAR_IN2, LOW);
   digitalWrite(FRONT_L_IN1, LOW);  digitalWrite(FRONT_L_IN2, LOW);
   digitalWrite(FRONT_R_IN1, LOW);  digitalWrite(FRONT_R_IN2, LOW);
