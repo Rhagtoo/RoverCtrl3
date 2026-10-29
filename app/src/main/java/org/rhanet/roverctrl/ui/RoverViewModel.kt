@@ -89,8 +89,8 @@ class RoverViewModel : ViewModel() {
         _sensitivity.value = s
     }
 
-    @Volatile var panCmd  = 0
-    @Volatile var tiltCmd = 0
+    @Volatile var panCmd  = 90
+    @Volatile var tiltCmd = 90
     @Volatile var laserOn = false
     @Volatile var brakeOn = false
 
@@ -159,7 +159,7 @@ class RoverViewModel : ViewModel() {
     fun disconnect() {
         cmdTickJob?.cancel(); telemJob?.cancel(); rssiJob?.cancel()
         telemRx.stop(); sender.clearHosts(); stopTurretStream()
-        spd = 0; str = 0; fwd = 0; panCmd = 0; tiltCmd = 0; laserOn = false
+        spd = 0; str = 0; fwd = 0; laserOn = false
         brakeOn = false   // BUGFIX: ручник залипал (сбрасывался только по keyUp геймпада)
         _telem.value = TelemetryData()
         _wifiRssi.value = 0

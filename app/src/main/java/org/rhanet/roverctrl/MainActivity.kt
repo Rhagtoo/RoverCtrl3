@@ -1,6 +1,10 @@
 package org.rhanet.roverctrl
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.hardware.input.InputManager
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -26,6 +30,50 @@ class MainActivity : AppCompatActivity() {
     private var gpPan = 0f
     private var gpTilt = 0f
     private var gpThrottle = 0f          // от триггеров
+
+    private val turretHandler = Handler(Looper.getMainLooper())
+    private var turretMoving = false
+    private var turretDeviceId = -1
+    private var turretPan = 90f
+    private var turretTilt = 90f
+    private var turretLastTick = 0L
+    private val turretTick = object : Runnable {
+        override fun run() {
+            if (!turretMoving) return
+            val now = SystemClock.elapsedRealtime()
+            val dt = (now - turretLastTick).coerceIn(0L, 100L) / 1000f
+            turretLastTick = now
+            turretPan = (turretPan + gpPan * 60f * dt).coerceIn(0f, 180f)
+            turretTilt = (turretTilt + gpTilt * 60f * dt).coerceIn(0f, 180f)
+            vm.setPanTilt(turretPan.toInt(), turretTilt.toInt())
+            turretHandler.postDelayed(this, 20L)
+        }
+    }
+    private val inputListener = object : InputManager.InputDeviceListener {
+        override fun onInputDeviceAdded(deviceId: Int) = Unit
+        override fun onInputDeviceChanged(deviceId: Int) = Unit
+        override fun onInputDeviceRemoved(deviceId: Int) {
+            if (deviceId == turretDeviceId) stopTurretMovement()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        (getSystemService(INPUT_SERVICE) as InputManager).registerInputDeviceListener(inputListener, turretHandler)
+    }
+
+    override fun onPause() {
+        stopTurretMovement()
+        (getSystemService(INPUT_SERVICE) as InputManager).unregisterInputDeviceListener(inputListener)
+        super.onPause()
+    }
+
+    private fun stopTurretMovement() {
+        turretMoving = false
+        gpPan = 0f
+        gpTilt = 0f
+        turretHandler.removeCallbacks(turretTick)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,6 +109,9 @@ class MainActivity : AppCompatActivity() {
             // Правый стик → pan / tilt
             gpPan  = getCenteredAxis(event, MotionEvent.AXIS_Z)
             gpTilt = -getCenteredAxis(event, MotionEvent.AXIS_RZ)
+            if (abs(gpPan) < 0.1f) gpPan = 0f
+            if (abs(gpTilt) < 0.1f) gpTilt = 0f
+            turretDeviceId = event.deviceId
 
             // Триггеры LT / RT как газ
             // На большинстве геймпадов (включая Bloody):
@@ -136,8 +187,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyGamepadTurret() {
-        val pan  = (gpPan  * 100).toInt().coerceIn(-100, 100)
-        val tilt = (gpTilt * 100).toInt().coerceIn(-100, 100)
-        vm.setPanTilt(pan, tilt)
+        if (gpPan == 0f && gpTilt == 0f) {
+            stopTurretMovement()
+        } else if (!turretMoving) {
+            turretPan = vm.panCmd.coerceIn(0, 180).toFloat()
+            turretTilt = vm.tiltCmd.coerceIn(0, 180).toFloat()
+            turretLastTick = SystemClock.elapsedRealtime()
+            turretMoving = true
+            turretHandler.post(turretTick)
+        }
     }
 }
