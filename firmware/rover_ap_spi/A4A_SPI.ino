@@ -1,6 +1,9 @@
 // ============================================================
 //  A4A_SPI.ino — ESP32-S3: WiFi AP + UDP приём + SPI master → Nano
 //
+//  v1.12: WiFi STA-first: пробует подключиться к домашней сети 'Rhanet',
+//        если не нашла за 12 с — поднимает свою точку доступа 'RoverAP'.
+//        Экран переключается каждые 4 с: телеметрия <-> сеть (MODE/IP/RSSI).
 //  v1.11: +OBS на экране — флаг препятствия от Nano (проброшен через rsvd
 //        SPI-ответа). Сразу видно, почему не едет вперёд.
 //  v1.10: Угол руля на экране считается ЛОКАЛЬНО из lastStr (без SPI round-trip).
@@ -82,8 +85,16 @@ unsigned long lastTime = 0;
 float rpmL = 0.0f, rpmR = 0.0f;
 
 // ====== WiFi / UDP ======
-const char* ssid     = "RoverAP";
-const char* password = "Der1parol";
+// v1.12: сначала пробуем подключиться к домашней сети (STA),
+//        если её нет — поднимаем свою точку доступа (AP).
+const char* STA_SSID = "Rhanet";
+const char* STA_PASS = "Der1parol";
+const char* AP_SSID  = "RoverAP";
+const char* AP_PASS  = "Der1parol";
+
+#define STA_TIMEOUT_MS 12000   // сколько ждём домашнюю сеть, прежде чем поднять AP
+
+bool wifiIsSta = false;
 
 WiFiUDP udp;
 unsigned int localUdpPort = 4210;
@@ -93,6 +104,44 @@ char incomingPacket[255];
 IPAddress lastSenderIP;
 uint16_t  lastSenderPort = 0;
 bool      haveSender = false;
+
+// Текущий IP ровера (STA или AP)
+IPAddress wifiIp() {
+  return wifiIsSta ? WiFi.localIP() : WiFi.softAPIP();
+}
+
+// STA-first с откатом на AP
+void startWifi() {
+  Serial.printf("WiFi: пробую '%s'...\n", STA_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);        // критично для низкой задержки UDP
+  WiFi.begin(STA_SSID, STA_PASS);
+
+  unsigned long t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < STA_TIMEOUT_MS) {
+    delay(250);
+    Serial.print(".");
+  }
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiIsSta = true;
+    Serial.printf("STA OK: IP %s  RSSI %d dBm\n",
+                  WiFi.localIP().toString().c_str(), WiFi.RSSI());
+    return;
+  }
+
+  Serial.printf("WiFi: '%s' не найдена — поднимаю AP '%s'\n", STA_SSID, AP_SSID);
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_AP);
+  if (WiFi.softAP(AP_SSID, AP_PASS)) {
+    wifiIsSta = false;
+    Serial.printf("AP OK: SSID %s  IP %s\n",
+                  AP_SSID, WiFi.softAPIP().toString().c_str());
+  } else {
+    Serial.println("AP FAILED!");
+  }
+}
 
 // Калибровка руля — симметрично относительно 90°
 const int SERVO_LEFT  = 123;
@@ -288,16 +337,32 @@ void drawOled() {
   int steerAngle = map(lastStr, -100, 100, SERVO_RIGHT, SERVO_LEFT);
   int speedPct = abs(lastSpd);
 
-  unsigned long up = millis() / 1000UL;
-  char dur[12];
-  fmtDur(gPrevRunSec, dur, sizeof(dur));
+  // v1.12: экран переключается каждые 4 с: диагностика <-> сеть.
+  // Экран сети нужен, чтобы знать IP, на который слать команды с ПК.
+  static bool showNet = false;
+  static unsigned long lastSwap = 0;
+  if (millis() - lastSwap > 4000) {
+    lastSwap = millis();
+    showNet = !showNet;
+  }
 
   char l1[24], l2[24], l3[24];
-  snprintf(l1, sizeof(l1), "ANG%3d SPD%3d%% OBS%d",
-           steerAngle, speedPct, nanoTelem.obstacle ? 1 : 0);
-  snprintf(l2, sizeof(l2), "BOOT#%lu UP %02lu:%02lu:%02lu",
-           (unsigned long)gBootCount, up / 3600, (up / 60) % 60, up % 60);
-  snprintf(l3, sizeof(l3), "RST %-9s (%s)", gResetName, dur);
+
+  if (showNet) {
+    snprintf(l1, sizeof(l1), "WIFI %s", wifiIsSta ? "STA" : "AP");
+    snprintf(l2, sizeof(l2), "IP %s", wifiIp().toString().c_str());
+    if (wifiIsSta) snprintf(l3, sizeof(l3), "RSSI %d dBm", (int)WiFi.RSSI());
+    else           snprintf(l3, sizeof(l3), "PASS Der1parol");
+  } else {
+    unsigned long up = millis() / 1000UL;
+    char dur[12];
+    fmtDur(gPrevRunSec, dur, sizeof(dur));
+    snprintf(l1, sizeof(l1), "ANG%3d SPD%3d%% OBS%d",
+             steerAngle, speedPct, nanoTelem.obstacle ? 1 : 0);
+    snprintf(l2, sizeof(l2), "BOOT#%lu UP %02lu:%02lu:%02lu",
+             (unsigned long)gBootCount, up / 3600, (up / 60) % 60, up % 60);
+    snprintf(l3, sizeof(l3), "RST %-9s (%s)", gResetName, dur);
+  }
 
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x10_tf);
@@ -345,18 +410,11 @@ void setup() {
   encoderRight.setCount(0);
   lastTime = millis();
 
-  // WiFi AP
-  Serial.print("Starting AP 'RoverAP'...");
-  if (WiFi.softAP(ssid, password)) {
-    Serial.println(" OK");
-    Serial.print("SSID: "); Serial.println(ssid);
-    Serial.print("IP: "); Serial.println(WiFi.softAPIP());
-  } else {
-    Serial.println(" FAILED!");
-  }
+  // WiFi: STA-first, иначе AP
+  startWifi();
 
   udp.begin(localUdpPort);
-  Serial.printf("Listening UDP on %s:%u\n", WiFi.softAPIP().toString().c_str(), localUdpPort);
+  Serial.printf("Listening UDP on %s:%u\n", wifiIp().toString().c_str(), localUdpPort);
 
   // ── OLED SSD1306 128x32 (I2C) ──
   Wire.begin(OLED_SDA, OLED_SCL);
