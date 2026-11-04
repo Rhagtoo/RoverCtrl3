@@ -131,7 +131,8 @@ class TelemetryReceiver {
         pitch = json.optDouble("pit", 0.0).toFloat(),
         roll  = json.optDouble("rol", 0.0).toFloat(),
         rssi  = json.optInt("rssi", 0),
-        rpmL  = if (json.has("rpmL")) json.optDouble("rpmL").toFloat() else Float.NaN,
+        // Левый энкодер установлен зеркально: при движении вперёд его сырое значение отрицательно.
+        rpmL  = if (json.has("rpmL")) -json.optDouble("rpmL").toFloat() else Float.NaN,
         rpmR  = if (json.has("rpmR")) json.optDouble("rpmR").toFloat() else Float.NaN,
         dir   = json.optInt("dir", 0),                 // v2.8: 1=вперёд, -1=назад
         dist  = json.optInt("dist", 0),                 // v2.8: сонар, см
@@ -151,3 +152,4 @@ class TelemetryReceiver {
                (System.currentTimeMillis() - lastPacketTime) < timeoutMs
     }
 }
+
