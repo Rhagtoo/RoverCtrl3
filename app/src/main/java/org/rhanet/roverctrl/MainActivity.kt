@@ -43,8 +43,8 @@ class MainActivity : AppCompatActivity() {
             val now = SystemClock.elapsedRealtime()
             val dt = (now - turretLastTick).coerceIn(0L, 100L) / 1000f
             turretLastTick = now
-            turretPan = (turretPan + gpPan * 60f * dt).coerceIn(0f, 180f)
-            turretTilt = (turretTilt + gpTilt * 60f * dt).coerceIn(0f, 180f)
+            turretPan = (turretPan + gpPan * 45f * dt).coerceIn(0f, 180f)
+            turretTilt = (turretTilt + gpTilt * 45f * dt).coerceIn(0f, 180f)
             vm.setPanTilt(turretPan.toInt(), turretTilt.toInt())
             turretHandler.postDelayed(this, 20L)
         }
@@ -107,7 +107,7 @@ class MainActivity : AppCompatActivity() {
             gpSteer = getCenteredAxis(event, MotionEvent.AXIS_X)
 
             // Правый стик → pan / tilt
-            gpPan  = getCenteredAxis(event, MotionEvent.AXIS_Z)
+            gpPan  = -getCenteredAxis(event, MotionEvent.AXIS_Z)
             gpTilt = -getCenteredAxis(event, MotionEvent.AXIS_RZ)
             if (abs(gpPan) < 0.1f) gpPan = 0f
             if (abs(gpTilt) < 0.1f) gpTilt = 0f
@@ -198,3 +198,4 @@ class MainActivity : AppCompatActivity() {
         }
     }
 }
+
