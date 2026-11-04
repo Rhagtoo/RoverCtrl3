@@ -1,6 +1,15 @@
 /**
- * rover_nano_spi.ino v11.4 — Arduino Nano: SPI slave + дрифт через IN1/IN2
+ * rover_nano_spi.ino v11.7 — Arduino Nano: SPI slave + дрифт через IN1/IN2
  *
+ * v11.7: Ручник переведён с SHORT-BRAKE на РЕВЕРС внутреннего переднего колеса:
+ *          руль влево → реверс левого переднего, руль вправо → реверс правого,
+ *          по центру → оба передних в coast.
+ *        Реверс — это нормальное «тяга назад», а не закоротка обмотки; при этом
+ *        качение вперёд даёт plugging-ток, поэтому перед реверсом ставится coast.
+ *        DIRECTION_COAST_MS = 50 (было 500 — слишком долго: полсекунды без тяги
+ *        на каждый старт с места и на каждое пересечение порогов руля).
+ *        Проверено на железе: ничего не горит, радиаторы драйверов справляются.
+ * v11.6: HB пороги 75/105 → 85/95.
  * v11.4: РУЧНИК ПЕРЕВЕДЁН С SHORT-BRAKE НА COAST.
  *        Было: IN1=IN2=HIGH → короткое замыкание обмотки → вращающийся мотор
  *        работает генератором, ток ограничен только сопротивлением обмотки
@@ -96,9 +105,16 @@ struct RspFrame {
 #define SERVO_UPDATE_MS    10
 #define PWM_RAMP_STEP     32
 
+// v11.7: короткий coast перед сменой режима (ручник / направление /
+// сектор руля). 50 мс достаточно, чтобы ключи не переключались под нагрузкой,
+// и мало, чтобы не чувствовалось как провал газа.
+#define DIRECTION_COAST_MS  50
+
 // ── Handbrake пороги руля ────────────────────────────────────────────
-#define HB_CENTER_MIN     75
-#define HB_CENTER_MAX    105
+// v11.6: сужены до 85/95 (было 75/105) — узкий центральный сектор,
+//        чтобы "прямо" ловилось точнее и раньше срабатывал поворотный кост.
+#define HB_CENTER_MIN     85
+#define HB_CENTER_MAX     95
 
 // ── SPI-буферы ───────────────────────────────────────────────────────
 volatile uint8_t spi_cmd_raw[8];
@@ -125,7 +141,8 @@ unsigned long lastServoUpdate = 0;
 
 // ── Состояние общего PWM / направления ────────────────────────────────
 int  commonRamped = 0;
-bool lastForward = true;
+// v11.7: lastForward больше не нужен — dead-time теперь по смене режима
+// (DIRECTION_COAST_MS), а не по отдельному флагу направления.
 
 // ================== CRC ==================
 
@@ -170,21 +187,16 @@ void setupPWMHighFreq() {
 // ================== Моторы: общий PWM + независимые IN1/IN2 ==================
 
 void applyMotors(int gas, bool forward, bool handbrake) {
+  // v11.7: режим = (сектор руля при ручнике) + (направление).
+  // На смене режима — короткий coast, чтобы не переключать H-мост под нагрузкой.
+  static int lastMode = -1;
+  static unsigned long modeChangedAt = 0;
+
   gas = constrain(gas, 0, 255);
 
   // KY-032 блокирует только движение ВПЕРЁД
   if (obstacle && forward && gas > 0) {
     gas = 0;
-  }
-
-  // Dead-time при смене направления
-  if (gas > 0 && lastForward != forward) {
-    digitalWrite(REAR_IN1, LOW);    digitalWrite(REAR_IN2, LOW);
-    digitalWrite(FRONT_L_IN1, LOW); digitalWrite(FRONT_L_IN2, LOW);
-    digitalWrite(FRONT_R_IN1, LOW); digitalWrite(FRONT_R_IN2, LOW);
-    OCR2B = 0;
-    delayMicroseconds(3000);
-    lastForward = forward;
   }
 
   if (gas == 0) {
@@ -194,6 +206,27 @@ void applyMotors(int gas, bool forward, bool handbrake) {
     commonRamped = 0;
     OCR2B = 0;
     leftPwm = 0; rightPwm = 0;
+    lastMode = -1;
+    return;
+  }
+
+  int turn = !handbrake ? 0
+           : targetServoAngle < HB_CENTER_MIN ? 1
+           : targetServoAngle > HB_CENTER_MAX ? 2
+           : 3;
+  int mode = turn + (forward ? 0 : 4);
+
+  if (mode != lastMode) {
+    lastMode = mode;
+    modeChangedAt = millis();
+    commonRamped = 0;
+  }
+
+  if (millis() - modeChangedAt < DIRECTION_COAST_MS) {
+    digitalWrite(REAR_IN1, LOW);    digitalWrite(REAR_IN2, LOW);
+    digitalWrite(FRONT_L_IN1, LOW); digitalWrite(FRONT_L_IN2, LOW);
+    digitalWrite(FRONT_R_IN1, LOW); digitalWrite(FRONT_R_IN2, LOW);
+    OCR2B = 0;
     return;
   }
 
@@ -211,20 +244,21 @@ void applyMotors(int gas, bool forward, bool handbrake) {
   int fr2 = forward ? LOW  : HIGH;
 
   if (handbrake) {
-    // v11.4: COAST вместо SHORT-BRAKE.
-    // Раньше IN1=IN2=HIGH замыкал обмотку: вращающийся мотор = генератор,
-    // ток ограничен только сопротивлением обмотки (6–12А против 1.2А у TB6612)
-    // → драйверы горели. Теперь просто снимаем тягу с переднего колеса:
-    // IN1=IN2=LOW → выход high-Z (coast), колесо катится свободно.
+    // v11.7: реверс внутреннего переднего колеса — разворот/дрифт.
+    // ВАЖНО: это нормальный реверс (тяга назад), НЕ закоротка обмотки.
+    // Чтобы не ловить plugging на скорости, перед этим отрабатывает
+    // DIRECTION_COAST_MS — режим сменился → Н-мост уже в coast.
     int sa = targetServoAngle;
     if (sa < HB_CENTER_MIN) {
-      // руль влево → снять тягу с левого переднего
-      fl1 = LOW; fl2 = LOW;
+      // руль влево → реверс левого переднего
+      fl1 = forward ? LOW : HIGH;
+      fl2 = forward ? HIGH : LOW;
     } else if (sa > HB_CENTER_MAX) {
-      // руль вправо → снять тягу с правого переднего
-      fr1 = LOW; fr2 = LOW;
+      // руль вправо → реверс правого переднего
+      fr1 = forward ? LOW : HIGH;
+      fr2 = forward ? HIGH : LOW;
     } else {
-      // руль по центру → снять тягу с обоих передних
+      // руль по центру → оба передних в coast (задние тянут)
       fl1 = LOW; fl2 = LOW;
       fr1 = LOW; fr2 = LOW;
     }
