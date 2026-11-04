@@ -1,6 +1,9 @@
 // ============================================================
 //  A4A_SPI.ino — ESP32-S3: WiFi AP + UDP приём + SPI master → Nano
 //
+//  v1.13: ФЕЙЛСЕЙФ СВЯЗИ. При пропадании команд > LINK_TIMEOUT_MS (500 мс)
+//        ESP32 шлёт нулевую скорость вместо бесконечного повтора последней.
+//        Раньше при обрыве WiFi ровер продолжал ехать на последней скорости.
 //  v1.12: WiFi STA-first: пробует подключиться к домашней сети 'Rhanet',
 //        если не нашла за 12 с — поднимает свою точку доступа 'RoverAP'.
 //        Экран переключается каждые 4 с: телеметрия <-> сеть (MODE/IP/RSSI).
@@ -95,6 +98,7 @@ const char* AP_PASS  = "Der1parol";
 #define STA_TIMEOUT_MS 12000   // сколько ждём домашнюю сеть, прежде чем поднять AP
 
 bool wifiIsSta = false;
+bool gLinkLost = false;   // v1.13: потеряна связь с пультом (для экрана)
 
 WiFiUDP udp;
 unsigned int localUdpPort = 4210;
@@ -149,6 +153,11 @@ const int SERVO_RIGHT = 57;
 
 // ====== Heartbeat ======
 #define HEARTBEAT_MS 100
+// v1.13: ФЕЙЛСЕЙФ. Если команды от пульта нет дольше этого времени — СТОП.
+// Раньше heartbeat бесконечно повторял последнюю скорость, поэтому при
+// пропадании WiFi ровер продолжал ехать (watchdog на Nano не срабатывал,
+// ведь ESP32 продолжал слать ему "команды").
+#define LINK_TIMEOUT_MS 500
 
 int lastSpd = 0, lastStr = 0, lastFwd = 0, lastLaser = 0;
 int lastTurp = 90, lastTilt = 90;
@@ -349,7 +358,8 @@ void drawOled() {
   char l1[24], l2[24], l3[24];
 
   if (showNet) {
-    snprintf(l1, sizeof(l1), "WIFI %s", wifiIsSta ? "STA" : "AP");
+    snprintf(l1, sizeof(l1), "WIFI %s %s",
+             wifiIsSta ? "STA" : "AP", gLinkLost ? "LOST" : "OK");
     snprintf(l2, sizeof(l2), "IP %s", wifiIp().toString().c_str());
     if (wifiIsSta) snprintf(l3, sizeof(l3), "RSSI %d dBm", (int)WiFi.RSSI());
     else           snprintf(l3, sizeof(l3), "PASS Der1parol");
@@ -522,22 +532,48 @@ void loop() {
     if (DBG_RPM_SERIAL) Serial.printf("RPM: Left=%.2f  Right=%.2f\n", rpmL, rpmR);
   }
 
-  // ── Heartbeat ──
+  // ── Failsafe + Heartbeat ──
+  // v1.13: сначала проверяем, ЖИВА ЛИ СВЯЗЬ. Нет команд от пульта —
+  // принудительный стоп. Только потом heartbeat.
   static unsigned long hbCount = 0;
   unsigned long nowHb = millis();
-  if (lastUdpRxTime > 0 && nowHb - lastHeartbeatSent >= HEARTBEAT_MS) {
-    int pwm_val = map(constrain(abs(lastSpd), 0, 100), 0, 100, 0, 255);
-    bool dir_fwd = (lastSpd >= 0);
-    int servoAngle = map(lastStr, -100, 100, SERVO_RIGHT, SERVO_LEFT);
 
-    bool ok = spiExchange(pwm_val, pwm_val, servoAngle, lastLaser, dir_fwd, true, lastBrake, lastTurp, lastTilt);
-    lastHeartbeatSent = nowHb;
-    hbCount++;
+  if (lastUdpRxTime > 0) {
+    bool linkOk = (nowHb - lastUdpRxTime) < LINK_TIMEOUT_MS;
 
-    if (hbCount % 10 == 0) {
-      Serial.printf("[HB #%lu] spd=%d pwm=%d dir=%s sv=%d brake=%d spi_ok=%d nano_st=0x%02X\n",
-                    hbCount, lastSpd, pwm_val, dir_fwd ? "FWD" : "REV",
-                    servoAngle, lastBrake ? 1 : 0, ok, nanoTelem.status);
+    if (!linkOk) {
+      if (!gLinkLost) {
+        gLinkLost = true;
+        Serial.println("[FAILSAFE] нет команд > LINK_TIMEOUT_MS — АВАРИЙНЫЙ СТОП");
+      }
+      // Нулевой газ, руль в центр, лазер/ручник выключены.
+      // enable=true обязательно: при enable=false Nano не трогает моторы
+      // и они остались бы на последней скорости.
+      spiExchange(0, 0, 90, false, true, true, false, 90, 90);
+      lastSpd = 0; lastStr = 0; lastFwd = 0; lastLaser = 0;
+      lastBrake = false; lastTurp = 90; lastTilt = 90;
+      lastHeartbeatSent = nowHb;
+    } else {
+      if (gLinkLost) {
+        gLinkLost = false;
+        Serial.println("[FAILSAFE] связь восстановлена");
+      }
+
+      if (nowHb - lastHeartbeatSent >= HEARTBEAT_MS) {
+        int pwm_val = map(constrain(abs(lastSpd), 0, 100), 0, 100, 0, 255);
+        bool dir_fwd = (lastSpd >= 0);
+        int servoAngle = map(lastStr, -100, 100, SERVO_RIGHT, SERVO_LEFT);
+
+        bool ok = spiExchange(pwm_val, pwm_val, servoAngle, lastLaser, dir_fwd, true, lastBrake, lastTurp, lastTilt);
+        lastHeartbeatSent = nowHb;
+        hbCount++;
+
+        if (hbCount % 10 == 0) {
+          Serial.printf("[HB #%lu] spd=%d pwm=%d dir=%s sv=%d brake=%d spi_ok=%d nano_st=0x%02X\n",
+                        hbCount, lastSpd, pwm_val, dir_fwd ? "FWD" : "REV",
+                        servoAngle, lastBrake ? 1 : 0, ok, nanoTelem.status);
+        }
+      }
     }
   }
 

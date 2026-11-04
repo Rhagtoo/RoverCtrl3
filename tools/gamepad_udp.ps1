@@ -11,6 +11,8 @@
       Левый стик X        — руль        (STR, -100..+100)
       RT / LT             — газ / назад (SPD, -100..+100)
       Правый стик X / Y   — турель pan / tilt   (pan инвертирован по умолчанию)
+                            плавно: ограничение $TurretRate °/с, кривая отклика
+                            и low-pass сглаживание (-TurretRate / -TurretSmooth)
       A                   — лазер (переключатель)
       B                   — ручник (держать)
       LB / RB             — sensitivity 20..100 %, шаг 20 %
@@ -35,6 +37,8 @@ param(
     [int]   $RateHz    = 50,
     [int]   $Deadzone  = 9000,            # мёртвая зона стиков (из 32767)
     [int]   $SensStart = 100,             # начальная sensitivity, %
+    [int]   $TurretRate  = 35,            # макс скорость турели, °/с (было 60)
+    [int]   $TurretSmooth = 75,           # 0..95 — сила low-pass на входе турели
     [switch]$NoInvertPan,                 # стартовать БЕЗ инверсии турели
     [switch]$Csv
 )
@@ -91,6 +95,8 @@ $script:sens      = [int]$SensStart
 $script:invertPan = (-not $NoInvertPan)
 $script:rssi      = $null
 $script:bat       = $null
+$script:panIn     = 0.0     # сглаженный вход pan
+$script:tiltIn    = 0.0     # сглаженный вход tilt
 
 # Шаг и границы sensitivity
 $SENS_MIN  = 20
@@ -110,6 +116,13 @@ function NormalizeAxis([int]$v, [int]$dz) {
     if ([math]::Abs($v) -le $dz) { return 0.0 }
     $sign = if ($v -gt 0) { 1.0 } else { -1.0 }
     return $sign * (([math]::Abs($v) - $dz) / (32767.0 - $dz))
+}
+
+# Кривая отклика для турели: мелкие отклонения стика дают ещё меньший ход,
+# поэтому возле центра получается точная подводка, а не рывки.
+function Shape-Axis([double]$x) {
+    if ([math]::Abs($x) -lt 0.0001) { return 0.0 }
+    return [math]::Sign($x) * [math]::Pow([math]::Abs($x), 1.6)
 }
 
 # ---------------------------------------------------------------- UDP: отправка
@@ -211,11 +224,20 @@ try {
         # руль: + = вправо (как в Android-приложении)
         $str = [int][math]::Round($lx * 100.0)
 
-        # турель: правый стик, 60 °/с как в приложении.
-        # pan инвертируется по флагу (по умолчанию инвертирован).
-        $panDir = if ($script:invertPan) { -$rx } else { $rx }
-        $script:pan  = [math]::Max(0.0, [math]::Min(180.0, $script:pan  + $panDir * 60.0 * $dt))
-        $script:tilt = [math]::Max(0.0, [math]::Min(180.0, $script:tilt - $ry * 60.0 * $dt))
+        # турель: правый стик. v2: плавнее — кривая отклика + low-pass
+        # + ограничение скорости ($TurretRate °/с вместо жёстких 60)
+        $smooth = [math]::Max(0, [math]::Min(95, $TurretSmooth)) / 100.0
+        $alpha  = 1.0 - $smooth
+
+        $shapeRx = Shape-Axis $rx
+        $shapeRy = Shape-Axis $ry
+        $script:panIn  = $script:panIn  * $smooth + $shapeRx * $alpha
+        $script:tiltIn = $script:tiltIn * $smooth + $shapeRy * $alpha
+
+        # pan инвертируется по флагу (по умолчанию инвертирован)
+        $panDir = if ($script:invertPan) { -$script:panIn } else { $script:panIn }
+        $script:pan  = [math]::Max(0.0, [math]::Min(180.0, $script:pan  + $panDir * $TurretRate * $dt))
+        $script:tilt = [math]::Max(0.0, [math]::Min(180.0, $script:tilt - $script:tiltIn * $TurretRate * $dt))
 
         # --- кнопки ---
         if ($bt -band $BTN_A) {
